@@ -401,10 +401,11 @@ export function LeadWorkspace() {
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Заведение</th><th>Контакты</th><th>Возможность</th><th>Статус</th><th>Заметка</th><th></th></tr></thead>
+                <thead><tr><th className="row-number">№</th><th>Заведение</th><th>Контакты</th><th>Возможность</th><th>Статус</th><th>Заметка</th><th></th></tr></thead>
                 <tbody>
-                  {filtered.map((lead) => (
+                  {filtered.map((lead, index) => (
                     <tr key={lead.id}>
+                      <td className="row-number">{index + 1}</td>
                       <td><div className="company"><div className="company-avatar">{initials(lead.name)}</div><div><strong>{lead.name}</strong><small>{lead.category}{lead.city ? ` · ${lead.city}` : ""}</small>{lead.address && <small style={{ display: "block" }}>{lead.address}</small>}</div></div></td>
                       <td>{lead.phone || lead.whatsapp ? <a className="contact-line" href={`tel:+${normalizePhone(lead.phone || lead.whatsapp)}`}>+{normalizePhone(lead.phone || lead.whatsapp)}</a> : <span className="muted">Нет номера</span>}{lead.instagram && <a className="contact-line muted" href={lead.instagram.startsWith("http") ? lead.instagram : `https://instagram.com/${lead.instagram.replace("@", "")}`} target="_blank" rel="noreferrer">{lead.instagram}</a>}</td>
                       <td>{lead.website ? <span className="signal good">● Есть сайт</span> : <span className="signal pending">● Нет сайта</span>}{lead.rating != null && <div className="muted" style={{ marginTop: 6 }}>★ {lead.rating.toFixed(1)}</div>}</td>
