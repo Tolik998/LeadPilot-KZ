@@ -63,7 +63,7 @@ h1 { font-size: clamp(30px, 4vw, 48px); margin: 0; letter-spacing: -.055em; line
 .stat-detail { font-size: 11px; color: var(--muted); margin-top: 3px; }
 
 .workspace { background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; box-shadow: 0 14px 40px rgba(28,52,44,.045); }
-.toolbar { padding: 15px; display: grid; grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(130px, .35fr)); gap: 10px; border-bottom: 1px solid var(--line); }
+.toolbar { padding: 15px; display: grid; grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(130px, .35fr)); gap: 10px; border-bottom: 1px solid var(--line); }
 .field, .select, .textarea { width: 100%; border: 1px solid var(--line); background: white; color: var(--ink); border-radius: 10px; outline: none; transition: border .15s ease, box-shadow .15s ease; }
 .field, .select { min-height: 42px; padding: 0 12px; }
 .textarea { min-height: 110px; padding: 11px 12px; resize: vertical; }

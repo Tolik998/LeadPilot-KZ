@@ -63,6 +63,8 @@ const statusLabels: Record<Status, string> = {
   declined: "Неактуально",
 };
 
+const statusOrder: Status[] = ["new", "contacted", "replied", "demo", "client", "declined"];
+
 const templateStorageKey = "leadpilot-message-template-v4";
 
 const defaultTemplate = `Здравствуйте. Посмотрел ваше заведение «{name}» и хотел предложить удобный сайт для онлайн-заказов: актуальное меню, корзина, заказ через WhatsApp, QR-меню для столов и простая админ-панель.
@@ -98,6 +100,7 @@ export function LeadWorkspace() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
+  const [sortBy, setSortBy] = useState<"created" | "status">("created");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Lead | null>(null);
   const [draft, setDraft] = useState<LeadDraft>(blankLead);
@@ -156,14 +159,18 @@ export function LeadWorkspace() {
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return leads.filter((lead) => {
+    const matches = leads.filter((lead) => {
       const matchesSearch = !needle || [lead.name, lead.category, lead.address, lead.phone, lead.instagram]
         .join(" ")
         .toLowerCase()
         .includes(needle);
       return matchesSearch && (statusFilter === "all" || lead.status === statusFilter) && (cityFilter === "all" || lead.city === cityFilter);
     });
-  }, [leads, search, statusFilter, cityFilter]);
+    if (sortBy === "status") {
+      return [...matches].sort((a, b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status) || b.id - a.id);
+    }
+    return matches;
+  }, [leads, search, statusFilter, cityFilter, sortBy]);
 
   const counts = useMemo(() => ({
     total: leads.length,
@@ -378,6 +385,10 @@ export function LeadWorkspace() {
             <select className="select" value={cityFilter} onChange={(event) => setCityFilter(event.target.value)} aria-label="Фильтр по городу">
               <option value="all">Все города</option>
               {cities.map((city) => <option key={city}>{city}</option>)}
+            </select>
+            <select className="select" value={sortBy} onChange={(event) => setSortBy(event.target.value as "created" | "status")} aria-label="Сортировка списка">
+              <option value="created">По дате добавления</option>
+              <option value="status">По статусу</option>
             </select>
           </div>
 
