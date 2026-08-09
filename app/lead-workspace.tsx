@@ -63,9 +63,9 @@ const statusLabels: Record<Status, string> = {
   declined: "Неактуально",
 };
 
-const templateStorageKey = "leadpilot-message-template-v2";
+const templateStorageKey = "leadpilot-message-template-v3";
 
-const defaultTemplate = `Здравствуйте! Посмотрел ваше заведение «{name}» и хотел предложить удобный сайт для онлайн-заказов: актуальное меню, корзина, заказ через WhatsApp, QR-меню для столов и простая админ-панель.
+const defaultTemplate = `Здравствуйте. Посмотрел ваше заведение «{name}» и хотел предложить удобный сайт для онлайн-заказов: актуальное меню, корзина, заказ через WhatsApp, QR-меню для столов и простая админ-панель.
 
 Вот пример сайта, который я уже сделал для ресторана:
 https://tuysqan.vercel.app
