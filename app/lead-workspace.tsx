@@ -238,8 +238,7 @@ export function LeadWorkspace() {
   async function openWhatsApp(lead: Lead) {
     const phone = normalizePhone(lead.whatsapp || lead.phone);
     if (!phone) {
-      openEdit(lead);
-      setError("Добавьте номер WhatsApp для этого заведения");
+      setError("У заведения нет номера WhatsApp. Добавьте его через кнопку «Изменить».");
       return;
     }
     const text = messageTemplate.replaceAll("{name}", lead.name).replaceAll("{city}", lead.city || "вашем городе");
