@@ -63,11 +63,16 @@ const statusLabels: Record<Status, string> = {
   declined: "Неактуально",
 };
 
-const defaultTemplate = `Здравствуйте! Посмотрел ваше заведение «{name}». Заметил, что гостям не очень удобно быстро открыть актуальное меню и оформить заказ.
+const templateStorageKey = "leadpilot-message-template-v2";
 
-Я сделал похожий сайт для Tuysqan: онлайн-меню, корзина, заказ через WhatsApp, QR для столов и админка. Пример: https://tuysqan.vercel.app
+const defaultTemplate = `Здравствуйте! Посмотрел ваше заведение «{name}» и хотел предложить удобный сайт для онлайн-заказов: актуальное меню, корзина, заказ через WhatsApp, QR-меню для столов и простая админ-панель.
 
-Могу бесплатно показать за 5 минут, как это будет выглядеть для «{name}». Если неактуально — больше беспокоить не буду.`;
+Вот пример сайта, который я уже сделал для ресторана:
+https://tuysqan.vercel.app
+
+Могу бесплатно показать весь функционал за 5 минут и предложить вариант под ваше заведение. Разработка быстрая и по доступной цене.
+
+Если интересно, отправлю короткую демонстрацию 🙌🏻`;
 
 function normalizePhone(value: string) {
   let digits = value.replace(/\D/g, "");
@@ -121,7 +126,7 @@ export function LeadWorkspace() {
 
   useEffect(() => {
     void loadLeads();
-    const savedTemplate = window.localStorage.getItem("leadpilot-message-template");
+    const savedTemplate = window.localStorage.getItem(templateStorageKey);
     if (savedTemplate) setMessageTemplate(savedTemplate);
     const savedAutomation = window.localStorage.getItem("leadpilot-2gis-automation");
     if (savedAutomation) {
@@ -304,7 +309,7 @@ export function LeadWorkspace() {
   }
 
   function saveTemplate() {
-    window.localStorage.setItem("leadpilot-message-template", messageTemplate);
+    window.localStorage.setItem(templateStorageKey, messageTemplate);
     setTemplateOpen(false);
   }
 
