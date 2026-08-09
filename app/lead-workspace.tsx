@@ -269,8 +269,11 @@ export function LeadWorkspace() {
       setLastSync(syncedAt);
       if (!silent) setImportOpen(false);
       await loadLeads();
-      setSyncNotice(data.added > 0 ? `Автосбор добавил новых заведений: ${data.added}` : "База актуальна — новых заведений не найдено");
-      if (!silent) window.alert(`Добавлено: ${data.added}. Пропущено дублей: ${data.skipped}. Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`);
+      const contactsNote = data.withContacts === 0 && data.total > 0
+        ? " Контакты не получены: для поля contacts нужен расширенный доступ 2ГИС."
+        : "";
+      setSyncNotice((data.added > 0 ? `Автосбор добавил новых заведений: ${data.added}` : "База актуальна — новых заведений не найдено") + contactsNote);
+      if (!silent) window.alert(`Добавлено: ${data.added}. Пропущено дублей: ${data.skipped}.${contactsNote} Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Не удалось импортировать данные";
       setError(message);
@@ -326,6 +329,12 @@ export function LeadWorkspace() {
 
         {error && <div className="error-banner">{error}</div>}
         {syncNotice && <div className="sync-banner"><span>{syncNotice}</span><button onClick={() => setSyncNotice("")} aria-label="Скрыть уведомление">×</button></div>}
+        {leads.length > 0 && leads.every((lead) => !lead.phone && !lead.whatsapp) && (
+          <div className="contact-warning">
+            <strong>2ГИС не передал телефоны.</strong>
+            Демо-ключ находит заведения, но поле контактов требует расширенного доступа 2ГИС. Пока номера можно открыть в карточке 2ГИС и добавить через кнопку «Изменить».
+          </div>
+        )}
 
         <section className="stats" aria-label="Статистика базы">
           <div className="stat" style={{ "--stat-color": "#dcebe3" } as React.CSSProperties}><div className="stat-label">Всего в базе</div><div className="stat-value">{counts.total}</div><div className="stat-detail">заведений</div></div>
@@ -366,7 +375,7 @@ export function LeadWorkspace() {
                       <td>{!lead.hasSite ? <span className="signal hot">● Нет сайта</span> : <span className="signal good">● Есть сайт</span>}{lead.rating != null && <div className="muted" style={{ marginTop: 6 }}>★ {lead.rating.toFixed(1)}</div>}</td>
                       <td><select className="status-select" value={lead.status} onChange={(event) => void patchLead(lead.id, { status: event.target.value as Status })}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
                       <td className="muted" style={{ maxWidth: 210 }}>{lead.notes || "—"}</td>
-                      <td><div className="row-actions"><button className="button whatsapp small" onClick={() => void openWhatsApp(lead)} aria-label={`Написать ${lead.name} в WhatsApp`}>WhatsApp ↗</button><button className="icon-button" onClick={() => openEdit(lead)} title="Изменить">✎</button><button className="icon-button" onClick={() => void deleteLead(lead.id)} title="Удалить">×</button></div></td>
+                      <td><div className="row-actions">{lead.phone || lead.whatsapp ? <button className="button whatsapp small" onClick={() => void openWhatsApp(lead)} aria-label={`Написать ${lead.name} в WhatsApp`}>WhatsApp ↗</button> : lead.sourceUrl ? <a className="button small" href={lead.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Открыть ${lead.name} в 2ГИС`}>Открыть 2ГИС ↗</a> : <button className="button small" onClick={() => openEdit(lead)}>Добавить номер</button>}<button className="icon-button" onClick={() => openEdit(lead)} title="Изменить">✎</button><button className="icon-button" onClick={() => void deleteLead(lead.id)} title="Удалить">×</button></div></td>
                     </tr>
                   ))}
                 </tbody>

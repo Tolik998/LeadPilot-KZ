@@ -50,12 +50,14 @@ export async function POST(request: Request) {
     const db = getDb();
     let added = 0;
     let skipped = 0;
+    let withContacts = 0;
     for (const item of collected) {
       const sourceId = item.id || "";
       const name = item.name?.trim() || "";
       if (!name) continue;
       const contacts = (item.contact_groups || []).flatMap((group) => group.contacts || []);
       const phone = contact(contacts, ["phone"]);
+      if (phone) withContacts += 1;
       const website = contact(contacts, ["website", "url"]);
       const instagram = contact(contacts, ["instagram"]);
       const duplicate = sourceId
@@ -83,7 +85,7 @@ export async function POST(request: Request) {
       });
       added += 1;
     }
-    return Response.json({ added, skipped, total: collected.length });
+    return Response.json({ added, skipped, total: collected.length, withContacts });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Import error" }, { status: 500 });
   }
