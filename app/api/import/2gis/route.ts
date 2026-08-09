@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       const url = new URL("https://catalog.api.2gis.com/3.0/items");
       url.searchParams.set("q", `${query} ${city}`);
       url.searchParams.set("type", "branch");
+      url.searchParams.set("has_site", "false");
       url.searchParams.set("page_size", "10");
       url.searchParams.set("page", String(page));
       url.searchParams.set("fields", "items.address,items.reviews,items.contact_groups");
@@ -103,7 +104,7 @@ export async function POST(request: Request) {
         rating: item.reviews?.general_rating ?? null,
         hasSite: Boolean(website),
         status: "new",
-        notes: phone ? "Импортировано из 2ГИС — проверьте WhatsApp перед отправкой." : "Импортировано из 2ГИС — добавьте рабочий номер.",
+        notes: phone ? "Найдено по фильтру 2ГИС «без сайта» — проверьте WhatsApp перед отправкой." : "Найдено по фильтру 2ГИС «без сайта» — добавьте рабочий номер.",
         updatedAt: new Date().toISOString(),
       });
       added += 1;

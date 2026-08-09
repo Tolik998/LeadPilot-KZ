@@ -103,6 +103,7 @@ tbody tr:hover { background: #fbfaf6; }
 .sync-banner button:hover { background: rgba(49,91,29,.09); }
 .contact-warning { margin-bottom: 15px; padding: 13px 15px; border-radius: 10px; color: #6c5310; background: #fff8dc; border: 1px solid #ead797; font-size: 13px; line-height: 1.45; }
 .contact-warning strong { display: block; margin-bottom: 3px; color: #4b3908; }
+.signal.pending { color: #785f1d; background: #fff7d8; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(17,31,27,.34); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 20px; animation: fade .15s ease; }
 .modal { width: min(680px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: var(--card); border-radius: 20px; box-shadow: 0 30px 80px rgba(12,30,24,.22); animation: rise .2s ease; }
