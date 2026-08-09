@@ -25,6 +25,18 @@ type Lead = {
 
 type LeadDraft = Omit<Lead, "id" | "createdAt" | "lastContactedAt">;
 
+type ImportForm = {
+  apiKey: string;
+  city: string;
+  query: string;
+  pages: number;
+};
+
+type SavedAutomation = ImportForm & {
+  enabled: boolean;
+  lastSync: string | null;
+};
+
 const blankLead: LeadDraft = {
   name: "",
   category: "Кафе",
@@ -86,7 +98,10 @@ export function LeadWorkspace() {
   const [importOpen, setImportOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [messageTemplate, setMessageTemplate] = useState(defaultTemplate);
-  const [importForm, setImportForm] = useState({ apiKey: "", city: "Кызылорда", query: "кафе ресторан", pages: 2 });
+  const [importForm, setImportForm] = useState<ImportForm>({ apiKey: "", city: "Кызылорда", query: "кафе ресторан", pages: 5 });
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function loadLeads() {
@@ -107,6 +122,28 @@ export function LeadWorkspace() {
     void loadLeads();
     const savedTemplate = window.localStorage.getItem("leadpilot-message-template");
     if (savedTemplate) setMessageTemplate(savedTemplate);
+    const savedAutomation = window.localStorage.getItem("leadpilot-2gis-automation");
+    if (savedAutomation) {
+      try {
+        const settings = JSON.parse(savedAutomation) as SavedAutomation;
+        const restored = {
+          apiKey: settings.apiKey || "",
+          city: settings.city || "Кызылорда",
+          query: settings.query || "кафе ресторан",
+          pages: Math.max(1, Math.min(5, Number(settings.pages) || 5)),
+        };
+        setImportForm(restored);
+        setAutoSyncEnabled(settings.enabled !== false);
+        setLastSync(settings.lastSync || null);
+        const lastRun = settings.lastSync ? new Date(settings.lastSync).getTime() : 0;
+        const isDue = Date.now() - lastRun > 24 * 60 * 60 * 1000;
+        if (settings.enabled !== false && settings.apiKey && isDue) {
+          void importFrom2Gis(true, restored);
+        }
+      } catch {
+        window.localStorage.removeItem("leadpilot-2gis-automation");
+      }
+    }
   }, []);
 
   const cities = useMemo(() => Array.from(new Set(leads.map((lead) => lead.city).filter(Boolean))).sort(), [leads]);
@@ -210,22 +247,34 @@ export function LeadWorkspace() {
     await patchLead(lead.id, { status: lead.status === "new" ? "contacted" : lead.status, lastContactedAt: new Date().toISOString() });
   }
 
-  async function importFrom2Gis() {
+  async function importFrom2Gis(silent = false, sourceForm: ImportForm = importForm) {
     setBusy(true);
     setError("");
+    if (silent) setSyncNotice("Проверяю новые заведения в 2ГИС…");
     try {
       const response = await fetch("/api/import/2gis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(importForm),
+        body: JSON.stringify(sourceForm),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось импортировать данные");
-      setImportOpen(false);
+      const syncedAt = new Date().toISOString();
+      const automation: SavedAutomation = { ...sourceForm, enabled: autoSyncEnabled, lastSync: syncedAt };
+      if (autoSyncEnabled) {
+        window.localStorage.setItem("leadpilot-2gis-automation", JSON.stringify(automation));
+      } else {
+        window.localStorage.removeItem("leadpilot-2gis-automation");
+      }
+      setLastSync(syncedAt);
+      if (!silent) setImportOpen(false);
       await loadLeads();
-      window.alert(`Добавлено: ${data.added}. Пропущено дублей: ${data.skipped}.`);
+      setSyncNotice(data.added > 0 ? `Автосбор добавил новых заведений: ${data.added}` : "База актуальна — новых заведений не найдено");
+      if (!silent) window.alert(`Добавлено: ${data.added}. Пропущено дублей: ${data.skipped}. Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось импортировать данные");
+      const message = err instanceof Error ? err.message : "Не удалось импортировать данные";
+      setError(message);
+      setSyncNotice("Автосбор требует проверки настроек 2ГИС");
     } finally {
       setBusy(false);
     }
@@ -270,12 +319,13 @@ export function LeadWorkspace() {
           </div>
           <div className="top-actions">
             <button className="button" onClick={() => setTemplateOpen(true)}>✎ Шаблон</button>
-            <button className="button" onClick={() => setImportOpen(true)}>↻ Импорт из 2ГИС</button>
+            <button className={`button ${lastSync ? "sync-active" : ""}`} onClick={() => setImportOpen(true)}>{busy ? "↻ Обновляю…" : lastSync ? "● Автосбор 2ГИС" : "↻ Подключить 2ГИС"}</button>
             <button className="button primary" onClick={openCreate}>＋ Добавить заведение</button>
           </div>
         </header>
 
         {error && <div className="error-banner">{error}</div>}
+        {syncNotice && <div className="sync-banner"><span>{syncNotice}</span><button onClick={() => setSyncNotice("")} aria-label="Скрыть уведомление">×</button></div>}
 
         <section className="stats" aria-label="Статистика базы">
           <div className="stat" style={{ "--stat-color": "#dcebe3" } as React.CSSProperties}><div className="stat-label">Всего в базе</div><div className="stat-value">{counts.total}</div><div className="stat-detail">заведений</div></div>
@@ -352,12 +402,14 @@ export function LeadWorkspace() {
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="import-title">
             <div className="modal-header"><div><h2 id="import-title">Импорт из 2ГИС</h2><p>Поиск работает через официальный Places API.</p></div><button className="icon-button" onClick={() => setImportOpen(false)} aria-label="Закрыть">×</button></div>
             <div className="modal-body"><div className="form-grid">
-              <div className="form-group full"><label>API‑ключ 2ГИС</label><input className="field" type="password" value={importForm.apiKey} onChange={(e) => setImportForm({ ...importForm, apiKey: e.target.value })} placeholder="Вставьте demo или рабочий ключ" /><div className="hint">Ключ используется только для этого запроса и не сохраняется в базе.</div></div>
+              <div className="form-group full"><label>API‑ключ 2ГИС</label><input className="field" type="password" value={importForm.apiKey} onChange={(e) => setImportForm({ ...importForm, apiKey: e.target.value })} placeholder="Вставьте demo или рабочий ключ" /><div className="hint">Ключ сохраняется только в этом браузере и не попадает в базу заведений.</div></div>
               <div className="form-group"><label>Город</label><input className="field" value={importForm.city} onChange={(e) => setImportForm({ ...importForm, city: e.target.value })} /></div>
               <div className="form-group"><label>Что искать</label><input className="field" value={importForm.query} onChange={(e) => setImportForm({ ...importForm, query: e.target.value })} placeholder="кафе ресторан" /></div>
               <div className="form-group"><label>Страниц результатов</label><select className="select" value={importForm.pages} onChange={(e) => setImportForm({ ...importForm, pages: Number(e.target.value) })}><option value={1}>1 страница · до 10</option><option value={2}>2 страницы · до 20</option><option value={3}>3 страницы · до 30</option><option value={5}>5 страниц · до 50</option></select></div>
-              <div className="form-group"><label>После импорта</label><div className="hint"><span className="pill">Автодубли</span><span className="pill">Фильтр без сайта</span><br />Проверьте номера перед первым сообщением.</div></div>
-            </div><div className="modal-footer"><button className="button" onClick={() => setImportOpen(false)}>Отмена</button><button className="button primary" disabled={busy || !importForm.apiKey.trim()} onClick={() => void importFrom2Gis()}>{busy ? "Импортирую…" : "Начать импорт"}</button></div></div>
+              <div className="form-group"><label>После импорта</label><div className="hint"><span className="pill">Автодубли</span><span className="pill">До 50 за запуск</span><br />Проверьте номера перед первым сообщением.</div></div>
+              <label className="automation-toggle form-group full"><input type="checkbox" checked={autoSyncEnabled} onChange={(event) => setAutoSyncEnabled(event.target.checked)} /><span><strong>Обновлять автоматически раз в сутки</strong><small>Сайт сам проверит новые заведения, когда вы его откроете.</small></span></label>
+              {lastSync && <div className="hint form-group full">Последняя проверка: {new Date(lastSync).toLocaleString("ru-RU")}</div>}
+            </div><div className="modal-footer"><button className="button" onClick={() => setImportOpen(false)}>Отмена</button><button className="button primary" disabled={busy || !importForm.apiKey.trim()} onClick={() => void importFrom2Gis()}>{busy ? "Заполняю базу…" : "Подключить и заполнить базу"}</button></div></div>
           </div>
         </div>
       )}

@@ -51,6 +51,7 @@ h1 { font-size: clamp(30px, 4vw, 48px); margin: 0; letter-spacing: -.055em; line
 .button.primary { background: var(--green); color: white; border-color: var(--green); }
 .button.primary:hover { background: var(--green-2); }
 .button.whatsapp { background: #e7f7ef; border-color: #b9e6ce; color: #146c45; }
+.button.sync-active { background: #edf8da; border-color: #cbe99b; color: #315b1d; }
 .button.small { min-height: 34px; padding: 0 11px; font-size: 12px; border-radius: 9px; }
 .button.danger { color: #b43a3a; }
 
@@ -97,6 +98,9 @@ tbody tr:hover { background: #fbfaf6; }
 .empty p { max-width: 430px; margin: 0 auto 18px; color: var(--muted); line-height: 1.55; font-size: 13px; }
 .loading { padding: 60px; text-align: center; color: var(--muted); }
 .error-banner { margin-bottom: 15px; padding: 12px 14px; border-radius: 10px; color: #8a332f; background: #fff0ef; border: 1px solid #f3cfcc; font-size: 13px; }
+.sync-banner { margin-bottom: 15px; padding: 11px 13px; border-radius: 10px; color: #315b1d; background: #f0f8df; border: 1px solid #d6e9ad; font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sync-banner button { width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: inherit; }
+.sync-banner button:hover { background: rgba(49,91,29,.09); }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(17,31,27,.34); backdrop-filter: blur(6px); display: grid; place-items: center; padding: 20px; animation: fade .15s ease; }
 .modal { width: min(680px, 100%); max-height: calc(100vh - 40px); overflow: auto; background: var(--card); border-radius: 20px; box-shadow: 0 30px 80px rgba(12,30,24,.22); animation: rise .2s ease; }
@@ -112,6 +116,11 @@ tbody tr:hover { background: #fbfaf6; }
 .hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .template-preview { margin-top: 13px; border: 1px solid var(--line); border-radius: 12px; background: #f8f7f2; padding: 13px; white-space: pre-wrap; font-size: 12px; line-height: 1.55; }
 .pill { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #edf1ea; font-size: 10px; font-weight: 800; margin-right: 5px; }
+.automation-toggle { display: flex; grid-column: 1/-1; grid-template-columns: none; align-items: flex-start; gap: 11px; padding: 13px; border: 1px solid var(--line); background: #f8f8f3; border-radius: 12px; cursor: pointer; }
+.automation-toggle input { width: 18px; height: 18px; accent-color: var(--green); margin-top: 1px; }
+.automation-toggle span { display: grid; gap: 3px; }
+.automation-toggle strong { font-size: 12px; }
+.automation-toggle small { color: var(--muted); font-size: 11px; line-height: 1.4; }
 
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
