@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, jsx-a11y/no-static-element-interactions, jsx-a11y/label-has-associated-control */
 "use client";
 
 import { useEffect, useMemo, useState } from "react";

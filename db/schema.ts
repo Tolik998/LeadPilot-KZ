@@ -1,8 +1,8 @@
 import { sql } from "drizzle-orm";
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { bigserial, boolean, doublePrecision, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
-export const leads = sqliteTable("leads", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const leads = pgTable("leads", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
   name: text("name").notNull(),
   category: text("category").notNull().default("Cafe"),
   city: text("city").notNull().default(""),
@@ -13,11 +13,11 @@ export const leads = sqliteTable("leads", {
   instagram: text("instagram").notNull().default(""),
   sourceUrl: text("source_url").notNull().default(""),
   sourceId: text("source_id").notNull().default(""),
-  rating: real("rating"),
-  hasSite: integer("has_site", { mode: "boolean" }).notNull().default(false),
+  rating: doublePrecision("rating"),
+  hasSite: boolean("has_site").notNull().default(false),
   status: text("status").notNull().default("new"),
   notes: text("notes").notNull().default(""),
-  lastContactedAt: text("last_contacted_at"),
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  lastContactedAt: timestamp("last_contacted_at", { withTimezone: true, mode: "string" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().default(sql`CURRENT_TIMESTAMP`),
 });
