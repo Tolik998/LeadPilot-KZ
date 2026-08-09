@@ -269,8 +269,7 @@ export function LeadWorkspace() {
       return;
     }
     const text = messageTemplate.replaceAll("{name}", lead.name).replaceAll("{city}", lead.city || "вашем городе");
-    const opened = window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
-    if (!opened) window.location.href = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
     await patchLead(lead.id, { status: lead.status === "new" ? "contacted" : lead.status, lastContactedAt: new Date().toISOString() });
   }
 
