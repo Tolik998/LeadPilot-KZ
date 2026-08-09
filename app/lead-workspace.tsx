@@ -63,7 +63,7 @@ const statusLabels: Record<Status, string> = {
   declined: "Неактуально",
 };
 
-const templateStorageKey = "leadpilot-message-template-v3";
+const templateStorageKey = "leadpilot-message-template-v4";
 
 const defaultTemplate = `Здравствуйте. Посмотрел ваше заведение «{name}» и хотел предложить удобный сайт для онлайн-заказов: актуальное меню, корзина, заказ через WhatsApp, QR-меню для столов и простая админ-панель.
 
@@ -72,7 +72,7 @@ https://tuysqan.vercel.app
 
 Могу бесплатно показать весь функционал за 5 минут и предложить вариант под ваше заведение. Разработка быстрая и по доступной цене.
 
-Если интересно, отправлю короткую демонстрацию 🙌🏻`;
+Если интересно, отправлю короткую демонстрацию. Если вы сотрудник, подскажите, пожалуйста, как связаться с администратором или владельцем заведения, чтобы обсудить предложение.`;
 
 function normalizePhone(value: string) {
   let digits = value.replace(/\D/g, "");
