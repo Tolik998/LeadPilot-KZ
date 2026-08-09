@@ -272,8 +272,13 @@ export function LeadWorkspace() {
       const contactsNote = data.withContacts === 0 && data.total > 0
         ? " Контакты не получены: для поля contacts нужен расширенный доступ 2ГИС."
         : "";
-      setSyncNotice((data.added > 0 ? `Автосбор добавил новых заведений: ${data.added}` : "База актуальна — новых заведений не найдено") + contactsNote);
-      if (!silent) window.alert(`Добавлено: ${data.added}. Пропущено дублей: ${data.skipped}.${contactsNote} Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`);
+      const resultNote = data.added > 0
+        ? `Автосбор добавил новых заведений: ${data.added}`
+        : data.updated > 0
+          ? `Контакты обновлены у заведений: ${data.updated}`
+          : "База актуальна — новых заведений не найдено";
+      setSyncNotice(resultNote + contactsNote);
+      if (!silent) window.alert(`Добавлено: ${data.added}. Обновлено контактов: ${data.updated || 0}. Пропущено дублей: ${data.skipped}.${contactsNote} Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Не удалось импортировать данные";
       setError(message);

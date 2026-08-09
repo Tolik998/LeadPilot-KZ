@@ -50,6 +50,7 @@ export async function POST(request: Request) {
     const db = getDb();
     let added = 0;
     let skipped = 0;
+    let updated = 0;
     let withContacts = 0;
     for (const item of collected) {
       const sourceId = item.id || "";
@@ -61,11 +62,33 @@ export async function POST(request: Request) {
       const website = contact(contacts, ["website", "url"]);
       const instagram = contact(contacts, ["instagram"]);
       const duplicate = sourceId
-        ? await db.select({ id: leads.id }).from(leads).where(or(eq(leads.sourceId, sourceId), phone ? eq(leads.phone, phone) : eq(leads.sourceId, sourceId))).limit(1)
+        ? await db.select().from(leads).where(or(eq(leads.sourceId, sourceId), phone ? eq(leads.phone, phone) : eq(leads.sourceId, sourceId))).limit(1)
         : phone
-          ? await db.select({ id: leads.id }).from(leads).where(eq(leads.phone, phone)).limit(1)
+          ? await db.select().from(leads).where(eq(leads.phone, phone)).limit(1)
           : [];
-      if (duplicate.length) { skipped += 1; continue; }
+      if (duplicate.length) {
+        const existing = duplicate[0];
+        const nextPhone = existing.phone || phone;
+        const nextWhatsApp = existing.whatsapp || phone;
+        const nextWebsite = existing.website || website;
+        const nextInstagram = existing.instagram || instagram;
+        const hasNewContacts = nextPhone !== existing.phone || nextWhatsApp !== existing.whatsapp || nextWebsite !== existing.website || nextInstagram !== existing.instagram;
+        if (hasNewContacts) {
+          await db.update(leads).set({
+            phone: nextPhone,
+            whatsapp: nextWhatsApp,
+            website: nextWebsite,
+            instagram: nextInstagram,
+            hasSite: Boolean(nextWebsite),
+            notes: existing.notes.includes("добавьте рабочий номер") ? "Контакты обновлены из 2ГИС — проверьте WhatsApp перед отправкой." : existing.notes,
+            updatedAt: new Date().toISOString(),
+          }).where(eq(leads.id, existing.id));
+          updated += 1;
+        } else {
+          skipped += 1;
+        }
+        continue;
+      }
       await db.insert(leads).values({
         name,
         category: item.purpose_name || "Кафе / ресторан",
@@ -85,7 +108,7 @@ export async function POST(request: Request) {
       });
       added += 1;
     }
-    return Response.json({ added, skipped, total: collected.length, withContacts });
+    return Response.json({ added, updated, skipped, total: collected.length, withContacts });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Import error" }, { status: 500 });
   }
