@@ -193,6 +193,21 @@ export function LeadWorkspace() {
     setEditorOpen(true);
   }
 
+  async function pastePhoneFromClipboard() {
+    try {
+      const clipboardValue = await navigator.clipboard.readText();
+      const phone = clipboardValue.trim();
+      if (normalizePhone(phone).length < 10) {
+        setError("В буфере обмена не найден корректный номер телефона");
+        return;
+      }
+      setDraft((current) => ({ ...current, phone, whatsapp: current.whatsapp || phone }));
+      setError("");
+    } catch {
+      setError("Не удалось прочитать буфер обмена. Разрешите доступ или вставьте номер вручную.");
+    }
+  }
+
   async function saveLead() {
     if (!draft.name.trim()) return setError("Укажите название заведения");
     setBusy(true);
@@ -399,7 +414,7 @@ export function LeadWorkspace() {
               <div className="form-group"><label>Категория</label><input className="field" value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })} /></div>
               <div className="form-group"><label>Город</label><input className="field" value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} /></div>
               <div className="form-group"><label>Адрес</label><input className="field" value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} /></div>
-              <div className="form-group"><label>Телефон</label><input className="field" value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} placeholder="+7 777 000 00 00" /></div>
+              <div className="form-group"><label>Телефон</label><div className="phone-entry"><input className="field" value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} placeholder="+7 777 000 00 00" /><button className="button small" type="button" onClick={() => void pastePhoneFromClipboard()}>Вставить</button></div></div>
               <div className="form-group"><label>WhatsApp</label><input className="field" value={draft.whatsapp} onChange={(e) => setDraft({ ...draft, whatsapp: e.target.value })} placeholder="Если отличается от телефона" /></div>
               <div className="form-group"><label>Сайт</label><input className="field" value={draft.website} onChange={(e) => setDraft({ ...draft, website: e.target.value, hasSite: Boolean(e.target.value) })} /></div>
               <div className="form-group"><label>Instagram</label><input className="field" value={draft.instagram} onChange={(e) => setDraft({ ...draft, instagram: e.target.value })} placeholder="@restaurant" /></div>

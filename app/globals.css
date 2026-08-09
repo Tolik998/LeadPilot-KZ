@@ -114,6 +114,8 @@ tbody tr:hover { background: #fbfaf6; }
 .form-group { display: grid; gap: 7px; }
 .form-group.full { grid-column: 1/-1; }
 .form-group label { font-size: 12px; font-weight: 800; }
+.phone-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
+.phone-entry .button { min-height: 42px; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
 .hint { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .template-preview { margin-top: 13px; border: 1px solid var(--line); border-radius: 12px; background: #f8f7f2; padding: 13px; white-space: pre-wrap; font-size: 12px; line-height: 1.55; }
