@@ -36,7 +36,66 @@ type ImportForm = {
 type SavedAutomation = ImportForm & {
   enabled: boolean;
   lastSync: string | null;
+  nextCursor?: number;
+  searchScope?: string;
 };
+
+type SearchSort = "creation_time" | "relevance" | "rating" | "name";
+
+const automationStorageKey = "leadpilot-2gis-automation";
+const defaultSearchQueries = [
+  "кафе",
+  "ресторан",
+  "кофейня",
+  "пиццерия",
+  "суши бар",
+  "столовая",
+  "донерная",
+  "кондитерская",
+];
+const defaultSearchQuery = defaultSearchQueries.join(", ");
+const searchSorts: Array<{ value: SearchSort; label: string }> = [
+  { value: "creation_time", label: "новые заведения" },
+  { value: "relevance", label: "по релевантности" },
+  { value: "rating", label: "по рейтингу" },
+  { value: "name", label: "по названию" },
+];
+
+function normalizeSearchInput(value: string) {
+  const normalized = value.trim();
+  if (!normalized || normalized.toLocaleLowerCase("ru") === "кафе ресторан") {
+    return defaultSearchQuery;
+  }
+  return normalized;
+}
+
+function searchQueries(value: string) {
+  const unique = new Map<string, string>();
+  for (const part of normalizeSearchInput(value).split(/[,;\n]+/)) {
+    const query = part.trim();
+    if (query) unique.set(query.toLocaleLowerCase("ru"), query);
+  }
+  return [...unique.values()];
+}
+
+function automationScope(form: ImportForm) {
+  return `${form.city.trim().toLocaleLowerCase("ru")}::${searchQueries(form.query)
+    .map((query) => query.toLocaleLowerCase("ru"))
+    .join("|")}`;
+}
+
+function searchJob(form: ImportForm, cursor: number) {
+  const queries = searchQueries(form.query);
+  const totalJobs = queries.length * searchSorts.length;
+  const safeCursor = ((cursor % totalJobs) + totalJobs) % totalJobs;
+  const queryIndex = safeCursor % queries.length;
+  const sortIndex = Math.floor(safeCursor / queries.length);
+  return {
+    query: queries[queryIndex],
+    sort: searchSorts[sortIndex],
+    nextCursor: (safeCursor + 1) % totalJobs,
+  };
+}
 
 const blankLead: LeadDraft = {
   name: "",
@@ -107,9 +166,11 @@ export function LeadWorkspace() {
   const [importOpen, setImportOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [messageTemplate, setMessageTemplate] = useState(defaultTemplate);
-  const [importForm, setImportForm] = useState<ImportForm>({ apiKey: "", city: "Кызылорда", query: "кафе ресторан", pages: 5 });
+  const [importForm, setImportForm] = useState<ImportForm>({ apiKey: "", city: "Кызылорда", query: defaultSearchQuery, pages: 5 });
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [searchCursor, setSearchCursor] = useState(0);
+  const [searchCursorScope, setSearchCursorScope] = useState("");
   const [syncNotice, setSyncNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -131,26 +192,32 @@ export function LeadWorkspace() {
     void loadLeads();
     const savedTemplate = window.localStorage.getItem(templateStorageKey);
     if (savedTemplate) setMessageTemplate(savedTemplate);
-    const savedAutomation = window.localStorage.getItem("leadpilot-2gis-automation");
+    const savedAutomation = window.localStorage.getItem(automationStorageKey);
     if (savedAutomation) {
       try {
         const settings = JSON.parse(savedAutomation) as SavedAutomation;
         const restored = {
           apiKey: settings.apiKey || "",
           city: settings.city || "Кызылорда",
-          query: settings.query || "кафе ресторан",
+          query: normalizeSearchInput(settings.query || defaultSearchQuery),
           pages: Math.max(1, Math.min(5, Number(settings.pages) || 5)),
         };
+        const restoredScope = automationScope(restored);
+        const restoredCursor = settings.searchScope === restoredScope
+          ? Math.max(0, Number(settings.nextCursor) || 0)
+          : 0;
         setImportForm(restored);
         setAutoSyncEnabled(settings.enabled !== false);
         setLastSync(settings.lastSync || null);
+        setSearchCursor(restoredCursor);
+        setSearchCursorScope(restoredScope);
         const lastRun = settings.lastSync ? new Date(settings.lastSync).getTime() : 0;
         const isDue = Date.now() - lastRun > 24 * 60 * 60 * 1000;
         if (settings.enabled !== false && settings.apiKey && isDue) {
-          void importFrom2Gis(true, restored);
+          void importFrom2Gis(true, restored, restoredCursor);
         }
       } catch {
-        window.localStorage.removeItem("leadpilot-2gis-automation");
+        window.localStorage.removeItem(automationStorageKey);
       }
     }
   }, []);
@@ -273,38 +340,53 @@ export function LeadWorkspace() {
     await patchLead(lead.id, { status: lead.status === "new" ? "contacted" : lead.status, lastContactedAt: new Date().toISOString() });
   }
 
-  async function importFrom2Gis(silent = false, sourceForm: ImportForm = importForm) {
+  async function importFrom2Gis(silent = false, sourceForm: ImportForm = importForm, requestedCursor?: number) {
     setBusy(true);
     setError("");
     if (silent) setSyncNotice("Проверяю новые заведения в 2ГИС…");
     try {
+      const scope = automationScope(sourceForm);
+      const cursor = requestedCursor ?? (scope === searchCursorScope ? searchCursor : 0);
+      const job = searchJob(sourceForm, cursor);
       const response = await fetch("/api/import/2gis", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sourceForm),
+        body: JSON.stringify({ ...sourceForm, query: job.query, sort: job.sort.value }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось импортировать данные");
       const syncedAt = new Date().toISOString();
-      const automation: SavedAutomation = { ...sourceForm, enabled: autoSyncEnabled, lastSync: syncedAt };
+      const automation: SavedAutomation = {
+        ...sourceForm,
+        query: normalizeSearchInput(sourceForm.query),
+        enabled: autoSyncEnabled,
+        lastSync: syncedAt,
+        nextCursor: job.nextCursor,
+        searchScope: scope,
+      };
       if (autoSyncEnabled) {
-        window.localStorage.setItem("leadpilot-2gis-automation", JSON.stringify(automation));
+        window.localStorage.setItem(automationStorageKey, JSON.stringify(automation));
       } else {
-        window.localStorage.removeItem("leadpilot-2gis-automation");
+        window.localStorage.removeItem(automationStorageKey);
       }
       setLastSync(syncedAt);
+      setSearchCursor(job.nextCursor);
+      setSearchCursorScope(scope);
       if (!silent) setImportOpen(false);
       await loadLeads();
+      const nextJob = searchJob(sourceForm, job.nextCursor);
       const contactsNote = data.withContacts === 0 && data.total > 0
         ? " Контакты не получены: для поля contacts нужен расширенный доступ 2ГИС."
         : "";
       const resultNote = data.added > 0
-        ? `Автосбор добавил новых заведений: ${data.added}`
+        ? `Автосбор «${job.query}» добавил заведений: ${data.added}`
         : data.updated > 0
-          ? `Контакты обновлены у заведений: ${data.updated}`
-          : "База актуальна — новых заведений не найдено";
+          ? `По запросу «${job.query}» обновлено контактов: ${data.updated}`
+          : `По запросу «${job.query}» новых заведений нет`;
       setSyncNotice(resultNote + contactsNote);
-      if (!silent) window.alert(`Добавлено: ${data.added}. Обновлено контактов: ${data.updated || 0}. Пропущено дублей: ${data.skipped}.${contactsNote} Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`);
+      if (!silent) window.alert(
+        `Проверено: «${job.query}» (${job.sort.label}). Добавлено: ${data.added}. Обновлено контактов: ${data.updated || 0}. Пропущено дублей: ${data.skipped}.${contactsNote} Следующая проверка: «${nextJob.query}» (${nextJob.sort.label}). Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Не удалось импортировать данные";
       setError(message);
@@ -449,7 +531,7 @@ export function LeadWorkspace() {
             <div className="modal-body"><div className="form-grid">
               <div className="form-group full"><label>API‑ключ 2ГИС</label><input className="field" type="password" value={importForm.apiKey} onChange={(e) => setImportForm({ ...importForm, apiKey: e.target.value })} placeholder="Вставьте demo или рабочий ключ" /><div className="hint">Ключ сохраняется только в этом браузере и не попадает в базу заведений.</div></div>
               <div className="form-group"><label>Город</label><input className="field" value={importForm.city} onChange={(e) => setImportForm({ ...importForm, city: e.target.value })} /></div>
-              <div className="form-group"><label>Что искать</label><input className="field" value={importForm.query} onChange={(e) => setImportForm({ ...importForm, query: e.target.value })} placeholder="кафе ресторан" /></div>
+              <div className="form-group"><label>Что искать</label><input className="field" value={importForm.query} onChange={(e) => setImportForm({ ...importForm, query: e.target.value })} placeholder="кафе, ресторан, кофейня" /><div className="hint">Укажите несколько запросов через запятую. Автосбор будет проверять их по очереди и менять сортировку.</div></div>
               <div className="form-group"><label>Страниц результатов</label><select className="select" value={importForm.pages} onChange={(e) => setImportForm({ ...importForm, pages: Number(e.target.value) })}><option value={1}>1 страница · до 10</option><option value={2}>2 страницы · до 20</option><option value={3}>3 страницы · до 30</option><option value={5}>5 страниц · до 50</option></select></div>
               <div className="form-group"><label>После импорта</label><div className="hint"><span className="pill">Только без сайта</span><span className="pill">Автодубли</span><span className="pill">До 50 за запуск</span><br />Проверьте номер и наличие сайта перед первым сообщением.</div></div>
               <label className="automation-toggle form-group full"><input type="checkbox" checked={autoSyncEnabled} onChange={(event) => setAutoSyncEnabled(event.target.checked)} /><span><strong>Обновлять автоматически раз в сутки</strong><small>Сайт сам проверит новые заведения, когда вы его откроете.</small></span></label>

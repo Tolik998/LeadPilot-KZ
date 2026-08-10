@@ -15,6 +15,8 @@ type Item = {
   contact_groups?: Array<{ contacts?: Contact[] }>;
 };
 
+const allowedSorts = new Set(["creation_time", "relevance", "rating", "name"]);
+
 function contact(items: Contact[], types: string[]) {
   const match = items.find((item) => types.includes((item.type || "").toLowerCase()));
   return match?.value || match?.text || match?.url || "";
@@ -23,11 +25,12 @@ function contact(items: Contact[], types: string[]) {
 export async function POST(request: Request) {
   try {
     await ensureSchema();
-    const payload = (await request.json()) as { apiKey?: string; city?: string; query?: string; pages?: number };
+    const payload = (await request.json()) as { apiKey?: string; city?: string; query?: string; pages?: number; sort?: string };
     const apiKey = payload.apiKey?.trim();
     const city = payload.city?.trim().slice(0, 100) || "Кызылорда";
     const query = payload.query?.trim().slice(0, 120) || "кафе ресторан";
     const pages = Math.max(1, Math.min(5, Number(payload.pages) || 1));
+    const sort = allowedSorts.has(payload.sort || "") ? payload.sort! : "creation_time";
     if (!apiKey) return Response.json({ error: "Укажите API‑ключ 2ГИС" }, { status: 400 });
 
     const collected: Item[] = [];
@@ -38,6 +41,7 @@ export async function POST(request: Request) {
       url.searchParams.set("has_site", "false");
       url.searchParams.set("page_size", "10");
       url.searchParams.set("page", String(page));
+      url.searchParams.set("sort", sort);
       url.searchParams.set("fields", "items.address,items.reviews,items.contact_groups");
       url.searchParams.set("key", apiKey);
       const response = await fetch(url, { headers: { Accept: "application/json" } });
@@ -109,7 +113,7 @@ export async function POST(request: Request) {
       });
       added += 1;
     }
-    return Response.json({ added, updated, skipped, total: collected.length, withContacts });
+    return Response.json({ added, updated, skipped, total: collected.length, withContacts, query, sort });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Import error" }, { status: 500 });
   }
