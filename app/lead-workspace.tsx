@@ -17,6 +17,7 @@ type Lead = {
   instagram: string;
   sourceUrl: string;
   rating: number | null;
+  reviewsCount: number;
   hasSite: boolean;
   status: Status;
   notes: string;
@@ -24,13 +25,14 @@ type Lead = {
   createdAt: string;
 };
 
-type LeadDraft = Omit<Lead, "id" | "createdAt" | "lastContactedAt">;
+type LeadDraft = Omit<Lead, "id" | "createdAt" | "lastContactedAt" | "reviewsCount">;
 
 type ImportForm = {
   apiKey: string;
   city: string;
   query: string;
   pages: number;
+  minReviews: number;
 };
 
 type SavedAutomation = ImportForm & {
@@ -81,7 +83,7 @@ function searchQueries(value: string) {
 function automationScope(form: ImportForm) {
   return `${form.city.trim().toLocaleLowerCase("ru")}::${searchQueries(form.query)
     .map((query) => query.toLocaleLowerCase("ru"))
-    .join("|")}`;
+    .join("|")}::${form.minReviews}`;
 }
 
 function searchJob(form: ImportForm, cursor: number) {
@@ -166,7 +168,7 @@ export function LeadWorkspace() {
   const [importOpen, setImportOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [messageTemplate, setMessageTemplate] = useState(defaultTemplate);
-  const [importForm, setImportForm] = useState<ImportForm>({ apiKey: "", city: "Кызылорда", query: defaultSearchQuery, pages: 5 });
+  const [importForm, setImportForm] = useState<ImportForm>({ apiKey: "", city: "Кызылорда", query: defaultSearchQuery, pages: 5, minReviews: 50 });
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [searchCursor, setSearchCursor] = useState(0);
@@ -201,6 +203,7 @@ export function LeadWorkspace() {
           city: settings.city || "Кызылорда",
           query: normalizeSearchInput(settings.query || defaultSearchQuery),
           pages: Math.max(1, Math.min(5, Number(settings.pages) || 5)),
+          minReviews: Math.max(0, Math.min(10000, Number(settings.minReviews) || 50)),
         };
         const restoredScope = automationScope(restored);
         const restoredCursor = settings.searchScope === restoredScope
@@ -375,17 +378,20 @@ export function LeadWorkspace() {
       if (!silent) setImportOpen(false);
       await loadLeads();
       const nextJob = searchJob(sourceForm, job.nextCursor);
-      const contactsNote = data.withContacts === 0 && data.total > 0
+      const contactsNote = data.withContacts === 0 && data.eligible > 0
         ? " Контакты не получены: для поля contacts нужен расширенный доступ 2ГИС."
+        : "";
+      const reviewsNote = data.skippedLowReviews > 0
+        ? ` Не прошли фильтр «от ${sourceForm.minReviews} отзывов»: ${data.skippedLowReviews}.`
         : "";
       const resultNote = data.added > 0
         ? `Автосбор «${job.query}» добавил заведений: ${data.added}`
         : data.updated > 0
           ? `По запросу «${job.query}» обновлено контактов: ${data.updated}`
           : `По запросу «${job.query}» новых заведений нет`;
-      setSyncNotice(resultNote + contactsNote);
+      setSyncNotice(resultNote + reviewsNote + contactsNote);
       if (!silent) window.alert(
-        `Проверено: «${job.query}» (${job.sort.label}). Добавлено: ${data.added}. Обновлено контактов: ${data.updated || 0}. Пропущено дублей: ${data.skipped}.${contactsNote} Следующая проверка: «${nextJob.query}» (${nextJob.sort.label}). Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`,
+        `Проверено: «${job.query}» (${job.sort.label}). Добавлено: ${data.added}. Обновлено данных: ${data.updated || 0}. Пропущено дублей: ${data.skipped}.${reviewsNote}${contactsNote} Следующая проверка: «${nextJob.query}» (${nextJob.sort.label}). Автосбор ${autoSyncEnabled ? "включён" : "выключен"}.`,
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Не удалось импортировать данные";
@@ -490,7 +496,7 @@ export function LeadWorkspace() {
                       <td className="row-number">{index + 1}</td>
                       <td><div className="company"><div className="company-avatar">{initials(lead.name)}</div><div><strong>{lead.name}</strong><small>{lead.category}{lead.city ? ` · ${lead.city}` : ""}</small>{lead.address && <small style={{ display: "block" }}>{lead.address}</small>}</div></div></td>
                       <td>{lead.phone || lead.whatsapp ? <a className="contact-line" href={`tel:+${normalizePhone(lead.phone || lead.whatsapp)}`}>+{normalizePhone(lead.phone || lead.whatsapp)}</a> : <span className="muted">Нет номера</span>}{lead.instagram && <a className="contact-line muted" href={lead.instagram.startsWith("http") ? lead.instagram : `https://instagram.com/${lead.instagram.replace("@", "")}`} target="_blank" rel="noreferrer">{lead.instagram}</a>}</td>
-                      <td>{lead.website ? <span className="signal good">● Есть сайт</span> : <span className="signal pending">● Нет сайта</span>}{lead.rating != null && <div className="muted" style={{ marginTop: 6 }}>★ {lead.rating.toFixed(1)}</div>}</td>
+                      <td>{lead.website ? <span className="signal good">● Есть сайт</span> : <span className="signal pending">● Нет сайта</span>}{lead.rating != null && <div className="muted" style={{ marginTop: 6 }}>★ {lead.rating.toFixed(1)}{lead.reviewsCount > 0 ? ` · ${lead.reviewsCount} отзывов` : ""}</div>}</td>
                       <td><select className="status-select" value={lead.status} onChange={(event) => void patchLead(lead.id, { status: event.target.value as Status })}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
                       <td className="muted" style={{ maxWidth: 210 }}>{lead.notes || "—"}</td>
                       <td><div className="row-actions">{lead.phone || lead.whatsapp ? <button className="button whatsapp small" onClick={() => void openWhatsApp(lead)} aria-label={`Написать ${lead.name} в WhatsApp`}>WhatsApp ↗</button> : lead.sourceUrl ? <a className="button small" href={lead.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Открыть ${lead.name} в 2ГИС`}>Открыть 2ГИС ↗</a> : <button className="button small" onClick={() => openEdit(lead)}>Добавить номер</button>}<button className="icon-button" onClick={() => openEdit(lead)} title="Изменить">✎</button><button className="icon-button" onClick={() => void deleteLead(lead.id)} title="Удалить">×</button></div></td>
@@ -533,6 +539,7 @@ export function LeadWorkspace() {
               <div className="form-group"><label>Город</label><input className="field" value={importForm.city} onChange={(e) => setImportForm({ ...importForm, city: e.target.value })} /></div>
               <div className="form-group"><label>Что искать</label><input className="field" value={importForm.query} onChange={(e) => setImportForm({ ...importForm, query: e.target.value })} placeholder="кафе, ресторан, кофейня" /><div className="hint">Укажите несколько запросов через запятую. Автосбор будет проверять их по очереди и менять сортировку.</div></div>
               <div className="form-group"><label>Страниц результатов</label><select className="select" value={importForm.pages} onChange={(e) => setImportForm({ ...importForm, pages: Number(e.target.value) })}><option value={1}>1 страница · до 10</option><option value={2}>2 страницы · до 20</option><option value={3}>3 страницы · до 30</option><option value={5}>5 страниц · до 50</option></select></div>
+              <div className="form-group"><label>Минимум отзывов</label><select className="select" value={importForm.minReviews} onChange={(e) => setImportForm({ ...importForm, minReviews: Number(e.target.value) })}><option value={0}>Без ограничения</option><option value={10}>От 10 отзывов</option><option value={25}>От 25 отзывов</option><option value={50}>От 50 отзывов</option><option value={100}>От 100 отзывов</option><option value={250}>От 250 отзывов</option></select><div className="hint">По умолчанию импортируются только заведения с 50 и более отзывами в 2ГИС.</div></div>
               <div className="form-group"><label>После импорта</label><div className="hint"><span className="pill">Только без сайта</span><span className="pill">Автодубли</span><span className="pill">До 50 за запуск</span><br />Проверьте номер и наличие сайта перед первым сообщением.</div></div>
               <label className="automation-toggle form-group full"><input type="checkbox" checked={autoSyncEnabled} onChange={(event) => setAutoSyncEnabled(event.target.checked)} /><span><strong>Обновлять автоматически раз в сутки</strong><small>Сайт сам проверит новые заведения, когда вы его откроете.</small></span></label>
               {lastSync && <div className="hint form-group full">Последняя проверка: {new Date(lastSync).toLocaleString("ru-RU")}</div>}

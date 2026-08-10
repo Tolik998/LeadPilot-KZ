@@ -23,6 +23,9 @@ function values(payload: Record<string, unknown>) {
     sourceUrl: clean(payload.sourceUrl, 400),
     sourceId: clean(payload.sourceId, 100),
     rating: typeof payload.rating === "number" && Number.isFinite(payload.rating) ? payload.rating : null,
+    reviewsCount: typeof payload.reviewsCount === "number" && Number.isFinite(payload.reviewsCount)
+      ? Math.max(0, Math.trunc(payload.reviewsCount))
+      : 0,
     hasSite: Boolean(payload.hasSite || clean(payload.website)),
     status: allowedStatuses.has(status) ? status : "new",
     notes: clean(payload.notes, 1500),

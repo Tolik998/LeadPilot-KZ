@@ -11,7 +11,12 @@ type Item = {
   full_name?: string;
   type?: string;
   purpose_name?: string;
-  reviews?: { general_rating?: number };
+  reviews?: {
+    general_rating?: number | string;
+    general_review_count?: number;
+    general_review_count_with_stars?: number;
+    review_count?: number | string;
+  };
   contact_groups?: Array<{ contacts?: Contact[] }>;
 };
 
@@ -22,14 +27,32 @@ function contact(items: Contact[], types: string[]) {
   return match?.value || match?.text || match?.url || "";
 }
 
+function finiteNumber(value: unknown) {
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function reviewStats(item: Item) {
+  const reviews = item.reviews;
+  return {
+    rating: reviews?.general_rating == null ? null : finiteNumber(reviews.general_rating),
+    count: Math.max(
+      finiteNumber(reviews?.general_review_count),
+      finiteNumber(reviews?.general_review_count_with_stars),
+      finiteNumber(reviews?.review_count),
+    ),
+  };
+}
+
 export async function POST(request: Request) {
   try {
     await ensureSchema();
-    const payload = (await request.json()) as { apiKey?: string; city?: string; query?: string; pages?: number; sort?: string };
+    const payload = (await request.json()) as { apiKey?: string; city?: string; query?: string; pages?: number; sort?: string; minReviews?: number };
     const apiKey = payload.apiKey?.trim();
     const city = payload.city?.trim().slice(0, 100) || "Кызылорда";
     const query = payload.query?.trim().slice(0, 120) || "кафе ресторан";
     const pages = Math.max(1, Math.min(5, Number(payload.pages) || 1));
+    const minReviews = Math.max(0, Math.min(10000, Math.trunc(Number(payload.minReviews) || 0)));
     const sort = allowedSorts.has(payload.sort || "") ? payload.sort! : "creation_time";
     if (!apiKey) return Response.json({ error: "Укажите API‑ключ 2ГИС" }, { status: 400 });
 
@@ -57,10 +80,16 @@ export async function POST(request: Request) {
     let skipped = 0;
     let updated = 0;
     let withContacts = 0;
+    let skippedLowReviews = 0;
     for (const item of collected) {
       const sourceId = item.id || "";
       const name = item.name?.trim() || "";
       if (!name) continue;
+      const stats = reviewStats(item);
+      if (stats.count < minReviews) {
+        skippedLowReviews += 1;
+        continue;
+      }
       const contacts = (item.contact_groups || []).flatMap((group) => group.contacts || []);
       const phone = contact(contacts, ["phone"]);
       if (phone) withContacts += 1;
@@ -77,13 +106,17 @@ export async function POST(request: Request) {
         const nextWhatsApp = existing.whatsapp || phone;
         const nextWebsite = existing.website || website;
         const nextInstagram = existing.instagram || instagram;
-        const hasNewContacts = nextPhone !== existing.phone || nextWhatsApp !== existing.whatsapp || nextWebsite !== existing.website || nextInstagram !== existing.instagram;
-        if (hasNewContacts) {
+        const nextRating = stats.rating || existing.rating;
+        const nextReviewsCount = Math.max(existing.reviewsCount, stats.count);
+        const hasNewData = nextPhone !== existing.phone || nextWhatsApp !== existing.whatsapp || nextWebsite !== existing.website || nextInstagram !== existing.instagram || nextRating !== existing.rating || nextReviewsCount !== existing.reviewsCount;
+        if (hasNewData) {
           await db.update(leads).set({
             phone: nextPhone,
             whatsapp: nextWhatsApp,
             website: nextWebsite,
             instagram: nextInstagram,
+            rating: nextRating,
+            reviewsCount: nextReviewsCount,
             hasSite: Boolean(nextWebsite),
             notes: existing.notes.includes("добавьте рабочий номер") ? "Контакты обновлены из 2ГИС — проверьте WhatsApp перед отправкой." : existing.notes,
             updatedAt: new Date().toISOString(),
@@ -105,7 +138,8 @@ export async function POST(request: Request) {
         instagram,
         sourceUrl: sourceId ? `https://2gis.kz/search/${encodeURIComponent(name)}/firm/${sourceId}` : "",
         sourceId,
-        rating: item.reviews?.general_rating ?? null,
+        rating: stats.rating,
+        reviewsCount: stats.count,
         hasSite: Boolean(website),
         status: "new",
         notes: phone ? "Найдено по фильтру 2ГИС «без сайта» — проверьте WhatsApp перед отправкой." : "Найдено по фильтру 2ГИС «без сайта» — добавьте рабочий номер.",
@@ -113,7 +147,18 @@ export async function POST(request: Request) {
       });
       added += 1;
     }
-    return Response.json({ added, updated, skipped, total: collected.length, withContacts, query, sort });
+    return Response.json({
+      added,
+      updated,
+      skipped,
+      skippedLowReviews,
+      eligible: collected.length - skippedLowReviews,
+      total: collected.length,
+      withContacts,
+      query,
+      sort,
+      minReviews,
+    });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Import error" }, { status: 500 });
   }

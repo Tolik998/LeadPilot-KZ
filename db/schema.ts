@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigserial, boolean, doublePrecision, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigserial, boolean, doublePrecision, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const leads = pgTable("leads", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
@@ -14,6 +14,7 @@ export const leads = pgTable("leads", {
   sourceUrl: text("source_url").notNull().default(""),
   sourceId: text("source_id").notNull().default(""),
   rating: doublePrecision("rating"),
+  reviewsCount: integer("reviews_count").notNull().default(0),
   hasSite: boolean("has_site").notNull().default(false),
   status: text("status").notNull().default("new"),
   notes: text("notes").notNull().default(""),
