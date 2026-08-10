@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "../../../../../db";
 import { ensureSchema } from "../../../../../db/runtime";
 import { leads } from "../../../../../db/schema";
@@ -37,7 +37,12 @@ export async function POST(request: Request) {
       url.searchParams.set("id", batch.map((lead) => lead.sourceId).join(","));
       url.searchParams.set("fields", "items.reviews");
       url.searchParams.set("key", apiKey);
-      const response = await fetch(url, { headers: { Accept: "application/json" } });
+      let response: Response;
+      try {
+        response = await fetch(url, { headers: { Accept: "application/json" } });
+      } catch {
+        throw new Error("Не удалось подключиться к 2ГИС. Повторите попытку позже.");
+      }
       const data = (await response.json()) as {
         meta?: { code?: number; error?: { message?: string } };
         result?: { items?: Item[] };
@@ -47,23 +52,35 @@ export async function POST(request: Request) {
       }
 
       const bySourceId = new Map((data.result?.items || []).map((item) => [item.id || "", item]));
-      await Promise.all(batch.map(async (lead) => {
+      const updates: Array<{ id: number; rating: number | null; reviewsCount: number }> = [];
+      for (const lead of batch) {
         const item = bySourceId.get(lead.sourceId);
         if (!item) {
           missing += 1;
-          return;
+          continue;
         }
         const stats = reviewStats(item.reviews);
         if (stats.count >= minReviews) aboveThreshold += 1;
         else belowThreshold += 1;
-        await db.update(leads).set({
-          rating: stats.rating,
-          reviewsCount: stats.count,
-          reviewsCheckedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }).where(eq(leads.id, lead.id));
-        updated += 1;
-      }));
+        updates.push({ id: lead.id, rating: stats.rating, reviewsCount: stats.count });
+      }
+
+      if (updates.length > 0) {
+        const values = sql.join(
+          updates.map((item) => sql`(${item.id}::bigint, ${item.rating}::double precision, ${item.reviewsCount}::integer)`),
+          sql`, `,
+        );
+        await db.execute(sql`
+          UPDATE leads AS target
+          SET rating = source.rating,
+              reviews_count = source.reviews_count,
+              reviews_checked_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+          FROM (VALUES ${values}) AS source(id, rating, reviews_count)
+          WHERE target.id = source.id
+        `);
+        updated += updates.length;
+      }
     }
 
     return Response.json({ checked: current.length, updated, aboveThreshold, belowThreshold, missing, minReviews });

@@ -39,7 +39,7 @@ type ImportForm = {
 type SavedAutomation = ImportForm & {
   enabled: boolean;
   lastSync: string | null;
-  lastReviewSync?: string | null;
+  reviewsBackfillCompleted?: boolean;
   nextCursor?: number;
   searchScope?: string;
 };
@@ -174,7 +174,6 @@ export function LeadWorkspace() {
   const [importForm, setImportForm] = useState<ImportForm>({ apiKey: "", city: "Кызылорда", query: defaultSearchQuery, pages: 5, minReviews: 50 });
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [lastSync, setLastSync] = useState<string | null>(null);
-  const [lastReviewSync, setLastReviewSync] = useState<string | null>(null);
   const [searchCursor, setSearchCursor] = useState(0);
   const [searchCursorScope, setSearchCursorScope] = useState("");
   const [syncNotice, setSyncNotice] = useState("");
@@ -216,16 +215,14 @@ export function LeadWorkspace() {
         setImportForm(restored);
         setAutoSyncEnabled(settings.enabled !== false);
         setLastSync(settings.lastSync || null);
-        setLastReviewSync(settings.lastReviewSync || null);
         setSearchCursor(restoredCursor);
         setSearchCursorScope(restoredScope);
         const lastRun = settings.lastSync ? new Date(settings.lastSync).getTime() : 0;
         const isDue = Date.now() - lastRun > 24 * 60 * 60 * 1000;
-        const lastReviewRun = settings.lastReviewSync ? new Date(settings.lastReviewSync).getTime() : 0;
-        const reviewsAreDue = Date.now() - lastReviewRun > 24 * 60 * 60 * 1000;
-        if (settings.enabled !== false && settings.apiKey && (reviewsAreDue || isDue)) {
+        const needsOneTimeBackfill = settings.reviewsBackfillCompleted !== true;
+        if (settings.enabled !== false && settings.apiKey && (needsOneTimeBackfill || isDue)) {
           void (async () => {
-            if (reviewsAreDue) await refreshNewLeadReviews(settings.apiKey, restored.minReviews, true);
+            if (needsOneTimeBackfill) await refreshNewLeadReviews(settings.apiKey, restored.minReviews, true);
             if (isDue) await importFrom2Gis(true, restored, restoredCursor);
           })();
         }
@@ -371,12 +368,10 @@ export function LeadWorkspace() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось обновить оценки");
-      const syncedAt = new Date().toISOString();
-      setLastReviewSync(syncedAt);
       const savedAutomation = window.localStorage.getItem(automationStorageKey);
       if (savedAutomation) {
         const settings = JSON.parse(savedAutomation) as SavedAutomation;
-        window.localStorage.setItem(automationStorageKey, JSON.stringify({ ...settings, lastReviewSync: syncedAt }));
+        window.localStorage.setItem(automationStorageKey, JSON.stringify({ ...settings, reviewsBackfillCompleted: true }));
       }
       await loadLeads();
       if (data.checked > 0) {
@@ -415,7 +410,7 @@ export function LeadWorkspace() {
         query: normalizeSearchInput(sourceForm.query),
         enabled: autoSyncEnabled,
         lastSync: syncedAt,
-        lastReviewSync: savedSettings?.lastReviewSync || lastReviewSync,
+        reviewsBackfillCompleted: savedSettings?.reviewsBackfillCompleted === true,
         nextCursor: job.nextCursor,
         searchScope: scope,
       };
