@@ -26,6 +26,7 @@ function values(payload: Record<string, unknown>) {
     reviewsCount: typeof payload.reviewsCount === "number" && Number.isFinite(payload.reviewsCount)
       ? Math.max(0, Math.trunc(payload.reviewsCount))
       : 0,
+    reviewsCheckedAt: typeof payload.reviewsCheckedAt === "string" ? payload.reviewsCheckedAt.slice(0, 40) : null,
     hasSite: Boolean(payload.hasSite || clean(payload.website)),
     status: allowedStatuses.has(status) ? status : "new",
     notes: clean(payload.notes, 1500),

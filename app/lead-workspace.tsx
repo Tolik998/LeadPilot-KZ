@@ -18,6 +18,7 @@ type Lead = {
   sourceUrl: string;
   rating: number | null;
   reviewsCount: number;
+  reviewsCheckedAt: string | null;
   hasSite: boolean;
   status: Status;
   notes: string;
@@ -25,7 +26,7 @@ type Lead = {
   createdAt: string;
 };
 
-type LeadDraft = Omit<Lead, "id" | "createdAt" | "lastContactedAt" | "reviewsCount">;
+type LeadDraft = Omit<Lead, "id" | "createdAt" | "lastContactedAt" | "reviewsCount" | "reviewsCheckedAt">;
 
 type ImportForm = {
   apiKey: string;
@@ -38,6 +39,7 @@ type ImportForm = {
 type SavedAutomation = ImportForm & {
   enabled: boolean;
   lastSync: string | null;
+  lastReviewSync?: string | null;
   nextCursor?: number;
   searchScope?: string;
 };
@@ -161,7 +163,8 @@ export function LeadWorkspace() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [cityFilter, setCityFilter] = useState("all");
-  const [sortBy, setSortBy] = useState<"created" | "status">("created");
+  const [minReviewsFilter, setMinReviewsFilter] = useState(50);
+  const [sortBy, setSortBy] = useState<"created" | "status" | "reviews">("reviews");
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Lead | null>(null);
   const [draft, setDraft] = useState<LeadDraft>(blankLead);
@@ -171,6 +174,7 @@ export function LeadWorkspace() {
   const [importForm, setImportForm] = useState<ImportForm>({ apiKey: "", city: "Кызылорда", query: defaultSearchQuery, pages: 5, minReviews: 50 });
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [lastReviewSync, setLastReviewSync] = useState<string | null>(null);
   const [searchCursor, setSearchCursor] = useState(0);
   const [searchCursorScope, setSearchCursorScope] = useState("");
   const [syncNotice, setSyncNotice] = useState("");
@@ -212,12 +216,18 @@ export function LeadWorkspace() {
         setImportForm(restored);
         setAutoSyncEnabled(settings.enabled !== false);
         setLastSync(settings.lastSync || null);
+        setLastReviewSync(settings.lastReviewSync || null);
         setSearchCursor(restoredCursor);
         setSearchCursorScope(restoredScope);
         const lastRun = settings.lastSync ? new Date(settings.lastSync).getTime() : 0;
         const isDue = Date.now() - lastRun > 24 * 60 * 60 * 1000;
-        if (settings.enabled !== false && settings.apiKey && isDue) {
-          void importFrom2Gis(true, restored, restoredCursor);
+        const lastReviewRun = settings.lastReviewSync ? new Date(settings.lastReviewSync).getTime() : 0;
+        const reviewsAreDue = Date.now() - lastReviewRun > 24 * 60 * 60 * 1000;
+        if (settings.enabled !== false && settings.apiKey && (reviewsAreDue || isDue)) {
+          void (async () => {
+            if (reviewsAreDue) await refreshNewLeadReviews(settings.apiKey, restored.minReviews, true);
+            if (isDue) await importFrom2Gis(true, restored, restoredCursor);
+          })();
         }
       } catch {
         window.localStorage.removeItem(automationStorageKey);
@@ -234,20 +244,27 @@ export function LeadWorkspace() {
         .join(" ")
         .toLowerCase()
         .includes(needle);
-      return matchesSearch && (statusFilter === "all" || lead.status === statusFilter) && (cityFilter === "all" || lead.city === cityFilter);
+      const matchesReviews = lead.status !== "new" || minReviewsFilter === 0 || lead.reviewsCheckedAt == null || lead.reviewsCount >= minReviewsFilter;
+      return matchesSearch && matchesReviews && (statusFilter === "all" || lead.status === statusFilter) && (cityFilter === "all" || lead.city === cityFilter);
     });
     if (sortBy === "status") {
       return [...matches].sort((a, b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status) || b.id - a.id);
     }
+    if (sortBy === "reviews") {
+      return [...matches].sort((a, b) => {
+        const statusPriority = Number(b.status === "new") - Number(a.status === "new");
+        return statusPriority || b.reviewsCount - a.reviewsCount || b.id - a.id;
+      });
+    }
     return matches;
-  }, [leads, search, statusFilter, cityFilter, sortBy]);
+  }, [leads, search, statusFilter, cityFilter, minReviewsFilter, sortBy]);
 
   const counts = useMemo(() => ({
     total: leads.length,
-    new: leads.filter((lead) => lead.status === "new").length,
+    new: leads.filter((lead) => lead.status === "new" && (minReviewsFilter === 0 || lead.reviewsCheckedAt == null || lead.reviewsCount >= minReviewsFilter)).length,
     replied: leads.filter((lead) => ["replied", "demo", "client"].includes(lead.status)).length,
     client: leads.filter((lead) => lead.status === "client").length,
-  }), [leads]);
+  }), [leads, minReviewsFilter]);
 
   function openCreate() {
     setEditing(null);
@@ -343,6 +360,38 @@ export function LeadWorkspace() {
     await patchLead(lead.id, { status: lead.status === "new" ? "contacted" : lead.status, lastContactedAt: new Date().toISOString() });
   }
 
+  async function refreshNewLeadReviews(apiKey: string, minReviews: number, silent = false) {
+    setBusy(true);
+    if (silent) setSyncNotice("Обновляю оценки текущих новых заведений…");
+    try {
+      const response = await fetch("/api/import/2gis/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey, minReviews }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Не удалось обновить оценки");
+      const syncedAt = new Date().toISOString();
+      setLastReviewSync(syncedAt);
+      const savedAutomation = window.localStorage.getItem(automationStorageKey);
+      if (savedAutomation) {
+        const settings = JSON.parse(savedAutomation) as SavedAutomation;
+        window.localStorage.setItem(automationStorageKey, JSON.stringify({ ...settings, lastReviewSync: syncedAt }));
+      }
+      await loadLeads();
+      if (data.checked > 0) {
+        setSyncNotice(`Оценки обновлены: ${data.updated}. Подходят под фильтр «от ${minReviews} отзывов»: ${data.aboveThreshold}.`);
+      }
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось обновить оценки");
+      if (silent) setSyncNotice("Не удалось обновить оценки текущих заведений");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function importFrom2Gis(silent = false, sourceForm: ImportForm = importForm, requestedCursor?: number) {
     setBusy(true);
     setError("");
@@ -359,11 +408,14 @@ export function LeadWorkspace() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Не удалось импортировать данные");
       const syncedAt = new Date().toISOString();
+      const savedAutomation = window.localStorage.getItem(automationStorageKey);
+      const savedSettings = savedAutomation ? JSON.parse(savedAutomation) as SavedAutomation : null;
       const automation: SavedAutomation = {
         ...sourceForm,
         query: normalizeSearchInput(sourceForm.query),
         enabled: autoSyncEnabled,
         lastSync: syncedAt,
+        lastReviewSync: savedSettings?.lastReviewSync || lastReviewSync,
         nextCursor: job.nextCursor,
         searchScope: scope,
       };
@@ -473,7 +525,16 @@ export function LeadWorkspace() {
               <option value="all">Все города</option>
               {cities.map((city) => <option key={city}>{city}</option>)}
             </select>
-            <select className="select" value={sortBy} onChange={(event) => setSortBy(event.target.value as "created" | "status")} aria-label="Сортировка списка">
+            <select className="select" value={minReviewsFilter} onChange={(event) => setMinReviewsFilter(Number(event.target.value))} aria-label="Фильтр новых заведений по отзывам">
+              <option value={0}>Новые: все отзывы</option>
+              <option value={10}>Новые: от 10 отзывов</option>
+              <option value={25}>Новые: от 25 отзывов</option>
+              <option value={50}>Новые: от 50 отзывов</option>
+              <option value={100}>Новые: от 100 отзывов</option>
+              <option value={250}>Новые: от 250 отзывов</option>
+            </select>
+            <select className="select" value={sortBy} onChange={(event) => setSortBy(event.target.value as "created" | "status" | "reviews")} aria-label="Сортировка списка">
+              <option value="reviews">По количеству отзывов</option>
               <option value="created">По дате добавления</option>
               <option value="status">По статусу</option>
             </select>
@@ -496,7 +557,7 @@ export function LeadWorkspace() {
                       <td className="row-number">{index + 1}</td>
                       <td><div className="company"><div className="company-avatar">{initials(lead.name)}</div><div><strong>{lead.name}</strong><small>{lead.category}{lead.city ? ` · ${lead.city}` : ""}</small>{lead.address && <small style={{ display: "block" }}>{lead.address}</small>}</div></div></td>
                       <td>{lead.phone || lead.whatsapp ? <a className="contact-line" href={`tel:+${normalizePhone(lead.phone || lead.whatsapp)}`}>+{normalizePhone(lead.phone || lead.whatsapp)}</a> : <span className="muted">Нет номера</span>}{lead.instagram && <a className="contact-line muted" href={lead.instagram.startsWith("http") ? lead.instagram : `https://instagram.com/${lead.instagram.replace("@", "")}`} target="_blank" rel="noreferrer">{lead.instagram}</a>}</td>
-                      <td>{lead.website ? <span className="signal good">● Есть сайт</span> : <span className="signal pending">● Нет сайта</span>}{lead.rating != null && <div className="muted" style={{ marginTop: 6 }}>★ {lead.rating.toFixed(1)}{lead.reviewsCount > 0 ? ` · ${lead.reviewsCount} отзывов` : ""}</div>}</td>
+                      <td>{lead.website ? <span className="signal good">● Есть сайт</span> : <span className="signal pending">● Нет сайта</span>}{lead.rating != null && <div className="muted" style={{ marginTop: 6 }}>★ {lead.rating.toFixed(1)}{lead.reviewsCheckedAt ? ` · ${lead.reviewsCount} отзывов` : " · оценки обновляются"}</div>}</td>
                       <td><select className="status-select" value={lead.status} onChange={(event) => void patchLead(lead.id, { status: event.target.value as Status })}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
                       <td className="muted" style={{ maxWidth: 210 }}>{lead.notes || "—"}</td>
                       <td><div className="row-actions">{lead.phone || lead.whatsapp ? <button className="button whatsapp small" onClick={() => void openWhatsApp(lead)} aria-label={`Написать ${lead.name} в WhatsApp`}>WhatsApp ↗</button> : lead.sourceUrl ? <a className="button small" href={lead.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Открыть ${lead.name} в 2ГИС`}>Открыть 2ГИС ↗</a> : <button className="button small" onClick={() => openEdit(lead)}>Добавить номер</button>}<button className="icon-button" onClick={() => openEdit(lead)} title="Изменить">✎</button><button className="icon-button" onClick={() => void deleteLead(lead.id)} title="Удалить">×</button></div></td>
@@ -539,11 +600,11 @@ export function LeadWorkspace() {
               <div className="form-group"><label>Город</label><input className="field" value={importForm.city} onChange={(e) => setImportForm({ ...importForm, city: e.target.value })} /></div>
               <div className="form-group"><label>Что искать</label><input className="field" value={importForm.query} onChange={(e) => setImportForm({ ...importForm, query: e.target.value })} placeholder="кафе, ресторан, кофейня" /><div className="hint">Укажите несколько запросов через запятую. Автосбор будет проверять их по очереди и менять сортировку.</div></div>
               <div className="form-group"><label>Страниц результатов</label><select className="select" value={importForm.pages} onChange={(e) => setImportForm({ ...importForm, pages: Number(e.target.value) })}><option value={1}>1 страница · до 10</option><option value={2}>2 страницы · до 20</option><option value={3}>3 страницы · до 30</option><option value={5}>5 страниц · до 50</option></select></div>
-              <div className="form-group"><label>Минимум отзывов</label><select className="select" value={importForm.minReviews} onChange={(e) => setImportForm({ ...importForm, minReviews: Number(e.target.value) })}><option value={0}>Без ограничения</option><option value={10}>От 10 отзывов</option><option value={25}>От 25 отзывов</option><option value={50}>От 50 отзывов</option><option value={100}>От 100 отзывов</option><option value={250}>От 250 отзывов</option></select><div className="hint">По умолчанию импортируются только заведения с 50 и более отзывами в 2ГИС.</div></div>
+              <div className="form-group"><label>Минимум отзывов</label><select className="select" value={importForm.minReviews} onChange={(e) => { const value = Number(e.target.value); setImportForm({ ...importForm, minReviews: value }); setMinReviewsFilter(value); }}><option value={0}>Без ограничения</option><option value={10}>От 10 отзывов</option><option value={25}>От 25 отзывов</option><option value={50}>От 50 отзывов</option><option value={100}>От 100 отзывов</option><option value={250}>От 250 отзывов</option></select><div className="hint">По умолчанию импортируются только заведения с 50 и более отзывами в 2ГИС.</div></div>
               <div className="form-group"><label>После импорта</label><div className="hint"><span className="pill">Только без сайта</span><span className="pill">Автодубли</span><span className="pill">До 50 за запуск</span><br />Проверьте номер и наличие сайта перед первым сообщением.</div></div>
               <label className="automation-toggle form-group full"><input type="checkbox" checked={autoSyncEnabled} onChange={(event) => setAutoSyncEnabled(event.target.checked)} /><span><strong>Обновлять автоматически раз в сутки</strong><small>Сайт сам проверит новые заведения, когда вы его откроете.</small></span></label>
               {lastSync && <div className="hint form-group full">Последняя проверка: {new Date(lastSync).toLocaleString("ru-RU")}</div>}
-            </div><div className="modal-footer"><button className="button" onClick={() => setImportOpen(false)}>Отмена</button><button className="button primary" disabled={busy || !importForm.apiKey.trim()} onClick={() => void importFrom2Gis()}>{busy ? "Заполняю базу…" : "Подключить и заполнить базу"}</button></div></div>
+            </div><div className="modal-footer"><button className="button" onClick={() => setImportOpen(false)}>Отмена</button><button className="button" disabled={busy || !importForm.apiKey.trim()} onClick={() => void refreshNewLeadReviews(importForm.apiKey, importForm.minReviews)}>{busy ? "Обновляю…" : "Обновить оценки текущих"}</button><button className="button primary" disabled={busy || !importForm.apiKey.trim()} onClick={() => void importFrom2Gis()}>{busy ? "Заполняю базу…" : "Подключить и заполнить базу"}</button></div></div>
           </div>
         </div>
       )}

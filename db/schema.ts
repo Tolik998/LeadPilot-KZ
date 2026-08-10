@@ -15,6 +15,7 @@ export const leads = pgTable("leads", {
   sourceId: text("source_id").notNull().default(""),
   rating: doublePrecision("rating"),
   reviewsCount: integer("reviews_count").notNull().default(0),
+  reviewsCheckedAt: timestamp("reviews_checked_at", { withTimezone: true, mode: "string" }),
   hasSite: boolean("has_site").notNull().default(false),
   status: text("status").notNull().default("new"),
   notes: text("notes").notNull().default(""),

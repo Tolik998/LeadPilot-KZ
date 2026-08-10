@@ -24,6 +24,7 @@ async function initializeSchema() {
     source_id TEXT NOT NULL DEFAULT '',
     rating DOUBLE PRECISION,
     reviews_count INTEGER NOT NULL DEFAULT 0,
+    reviews_checked_at TIMESTAMPTZ,
     has_site BOOLEAN NOT NULL DEFAULT FALSE,
     status TEXT NOT NULL DEFAULT 'new',
     notes TEXT NOT NULL DEFAULT '',
@@ -32,6 +33,7 @@ async function initializeSchema() {
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`;
   await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS reviews_count INTEGER NOT NULL DEFAULT 0`;
+  await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS reviews_checked_at TIMESTAMPTZ`;
   await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_source_id ON leads(source_id) WHERE source_id != ''`;
   await sql`CREATE INDEX IF NOT EXISTS idx_leads_status_city ON leads(status, city)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone) WHERE phone != ''`;

@@ -2,6 +2,7 @@ import { eq, or } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { ensureSchema } from "../../../../db/runtime";
 import { leads } from "../../../../db/schema";
+import { reviewStats, type Reviews } from "./reviews";
 
 type Contact = { type?: string; value?: string; text?: string; url?: string };
 type Item = {
@@ -11,12 +12,7 @@ type Item = {
   full_name?: string;
   type?: string;
   purpose_name?: string;
-  reviews?: {
-    general_rating?: number | string;
-    general_review_count?: number;
-    general_review_count_with_stars?: number;
-    review_count?: number | string;
-  };
+  reviews?: Reviews;
   contact_groups?: Array<{ contacts?: Contact[] }>;
 };
 
@@ -25,23 +21,6 @@ const allowedSorts = new Set(["creation_time", "relevance", "rating", "name"]);
 function contact(items: Contact[], types: string[]) {
   const match = items.find((item) => types.includes((item.type || "").toLowerCase()));
   return match?.value || match?.text || match?.url || "";
-}
-
-function finiteNumber(value: unknown) {
-  const number = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function reviewStats(item: Item) {
-  const reviews = item.reviews;
-  return {
-    rating: reviews?.general_rating == null ? null : finiteNumber(reviews.general_rating),
-    count: Math.max(
-      finiteNumber(reviews?.general_review_count),
-      finiteNumber(reviews?.general_review_count_with_stars),
-      finiteNumber(reviews?.review_count),
-    ),
-  };
 }
 
 export async function POST(request: Request) {
@@ -85,7 +64,7 @@ export async function POST(request: Request) {
       const sourceId = item.id || "";
       const name = item.name?.trim() || "";
       if (!name) continue;
-      const stats = reviewStats(item);
+      const stats = reviewStats(item.reviews);
       if (stats.count < minReviews) {
         skippedLowReviews += 1;
         continue;
@@ -108,7 +87,7 @@ export async function POST(request: Request) {
         const nextInstagram = existing.instagram || instagram;
         const nextRating = stats.rating || existing.rating;
         const nextReviewsCount = Math.max(existing.reviewsCount, stats.count);
-        const hasNewData = nextPhone !== existing.phone || nextWhatsApp !== existing.whatsapp || nextWebsite !== existing.website || nextInstagram !== existing.instagram || nextRating !== existing.rating || nextReviewsCount !== existing.reviewsCount;
+        const hasNewData = nextPhone !== existing.phone || nextWhatsApp !== existing.whatsapp || nextWebsite !== existing.website || nextInstagram !== existing.instagram || nextRating !== existing.rating || nextReviewsCount !== existing.reviewsCount || existing.reviewsCheckedAt == null;
         if (hasNewData) {
           await db.update(leads).set({
             phone: nextPhone,
@@ -117,6 +96,7 @@ export async function POST(request: Request) {
             instagram: nextInstagram,
             rating: nextRating,
             reviewsCount: nextReviewsCount,
+            reviewsCheckedAt: new Date().toISOString(),
             hasSite: Boolean(nextWebsite),
             notes: existing.notes.includes("добавьте рабочий номер") ? "Контакты обновлены из 2ГИС — проверьте WhatsApp перед отправкой." : existing.notes,
             updatedAt: new Date().toISOString(),
@@ -140,6 +120,7 @@ export async function POST(request: Request) {
         sourceId,
         rating: stats.rating,
         reviewsCount: stats.count,
+        reviewsCheckedAt: new Date().toISOString(),
         hasSite: Boolean(website),
         status: "new",
         notes: phone ? "Найдено по фильтру 2ГИС «без сайта» — проверьте WhatsApp перед отправкой." : "Найдено по фильтру 2ГИС «без сайта» — добавьте рабочий номер.",
