@@ -16,6 +16,14 @@ type Item = {
   contact_groups?: Array<{ contacts?: Contact[] }>;
 };
 
+type PlacesResponse = {
+  meta?: {
+    code?: number;
+    error?: { message?: string; type?: string };
+  };
+  result?: { items?: Item[] };
+};
+
 const allowedSorts = new Set(["creation_time", "relevance", "rating", "name"]);
 
 function contact(items: Contact[], types: string[]) {
@@ -47,7 +55,10 @@ export async function POST(request: Request) {
       url.searchParams.set("fields", "items.address,items.reviews,items.contact_groups");
       url.searchParams.set("key", apiKey);
       const response = await fetch(url, { headers: { Accept: "application/json" } });
-      const data = (await response.json()) as { meta?: { code?: number; error?: { message?: string } }; result?: { items?: Item[] } };
+      const data = (await response.json()) as PlacesResponse;
+      const resultsNotFound = data.meta?.code === 404
+        && (data.meta.error?.type === "itemNotFound" || data.meta.error?.message === "Results not found");
+      if (resultsNotFound) break;
       if (!response.ok || (data.meta?.code && data.meta.code !== 200)) {
         throw new Error(data.meta?.error?.message || "2ГИС отклонил запрос. Проверьте API‑ключ и доступ к контактам.");
       }
