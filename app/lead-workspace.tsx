@@ -4,7 +4,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, ConfirmDialog, Dialog, FeedbackBanner, Icon } from "./ui";
 
-type Status = "new" | "contacted" | "replied" | "demo" | "client" | "declined";
+type Status =
+  | "new"
+  | "contacted"
+  | "contacted2"
+  | "contacted3"
+  | "replied"
+  | "demo"
+  | "client"
+  | "declined";
 
 type Lead = {
   id: number;
@@ -90,6 +98,8 @@ const blankLead: LeadDraft = {
 const statusLabels: Record<Status, string> = {
   new: "Новый",
   contacted: "Написал",
+  contacted2: "Написал 2",
+  contacted3: "Написал 3",
   replied: "Ответил",
   demo: "Показ",
   client: "Клиент",
@@ -99,11 +109,26 @@ const statusLabels: Record<Status, string> = {
 const statusOrder: Status[] = [
   "new",
   "contacted",
+  "contacted2",
+  "contacted3",
   "replied",
   "demo",
   "client",
   "declined",
 ];
+
+const contactedStatuses = new Set<Status>(["contacted", "contacted2", "contacted3"]);
+
+const nextContactStatus: Record<Status, Status> = {
+  new: "contacted",
+  contacted: "contacted2",
+  contacted2: "contacted3",
+  contacted3: "contacted3",
+  replied: "replied",
+  demo: "demo",
+  client: "client",
+  declined: "declined",
+};
 
 const defaultTemplate = `Здравствуйте. Посмотрел ваше заведение «{name}» и хотел предложить удобный сайт для онлайн-заказов: актуальное меню, корзина, заказ через WhatsApp, QR-меню для столов и админ-панель, в которой можно менять меню и информацию.
 
@@ -390,7 +415,7 @@ export function LeadWorkspace() {
     () => ({
       total: leads.length,
       new: leads.filter((lead) => lead.status === "new").length,
-      contacted: leads.filter((lead) => lead.status === "contacted").length,
+      contacted: leads.filter((lead) => contactedStatuses.has(lead.status)).length,
       replied: leads.filter((lead) => lead.status === "replied").length,
       demo: leads.filter((lead) => lead.status === "demo").length,
       client: leads.filter((lead) => lead.status === "client").length,
@@ -626,7 +651,7 @@ export function LeadWorkspace() {
       "noopener,noreferrer",
     );
     await patchLead(lead.id, {
-      status: lead.status === "new" ? "contacted" : lead.status,
+      status: nextContactStatus[lead.status],
       lastContactedAt: new Date().toISOString(),
     });
   }
@@ -907,7 +932,7 @@ export function LeadWorkspace() {
         <article className="metric-card status-contacted">
           <span>Написал</span>
           <strong>{counts.contacted}</strong>
-          <small>сообщение отправлено</small>
+          <small>1–3 сообщения отправлены</small>
         </article>
         <article className="metric-card status-replied">
           <span>Ответили</span>

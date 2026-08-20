@@ -914,6 +914,12 @@ textarea:disabled {
 .status-control.status-contacted {
   --status: #4278a7;
 }
+.status-control.status-contacted2 {
+  --status: #5b6eae;
+}
+.status-control.status-contacted3 {
+  --status: #715f9f;
+}
 .status-control.status-replied {
   --status: #8d69aa;
 }

@@ -55,6 +55,8 @@ Status meaning must always be conveyed by label plus color.
 | ------- | ---------- | ---------- | -------------------- |
 | Новый   | `#7A520E`  | `#FFF0C6`  | unprocessed signal   |
 | Написал | `#315B72`  | `#E6F0F5`  | outreach sent        |
+| Написал 2 | `#4D5E96`  | `#E9ECF7`  | second outreach      |
+| Написал 3 | `#66538D`  | `#EFEAF6`  | third outreach       |
 | Ответил | `#425493`  | `#EAEDFA`  | conversation started |
 | Показ   | `#70508A`  | `#F0EAF5`  | demonstration stage  |
 | Клиент  | `#216544`  | `#E1F1E7`  | converted            |

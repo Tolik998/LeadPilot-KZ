@@ -3,7 +3,16 @@ import { getDb } from "../../../db";
 import { ensureSchema } from "../../../db/runtime";
 import { leads } from "../../../db/schema";
 
-const allowedStatuses = new Set(["new", "contacted", "replied", "demo", "client", "declined"]);
+const allowedStatuses = new Set([
+  "new",
+  "contacted",
+  "contacted2",
+  "contacted3",
+  "replied",
+  "demo",
+  "client",
+  "declined",
+]);
 
 function clean(value: unknown, max = 500) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
