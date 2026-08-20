@@ -52,6 +52,7 @@ type SearchSort = "creation_time" | "relevance" | "rating" | "name";
 
 const automationStorageKey = "leadpilot-2gis-automation";
 const templateStorageKey = "leadpilot-message-template-v5";
+const followUpTemplateStorageKey = "leadpilot-follow-up-template-v1";
 const defaultSearchQueries = [
   "кафе",
   "ресторан",
@@ -112,6 +113,12 @@ https://tuysqan.vercel.app
 Могу бесплатно показать весь функционал за 5 минут и предложить вариант под ваше заведение. Разработка быстрая и по доступной цене.
 
 Если интересно, отправлю короткую демонстрацию. Если вы сотрудник, подскажите, пожалуйста, как связаться с администратором или владельцем заведения, чтобы обсудить предложение.`;
+
+const defaultFollowUpTemplate = `Здравствуйте! Хотел уточнить по поводу моего прошлого сообщения насчёт сайта для {name}
+
+Я могу бесплатно сделать небольшой демо-вариант именно под ваше заведение, чтобы вы сразу увидели, как будет выглядеть меню, корзина, QR-меню и оформление заказа через WhatsApp.
+
+Если вам это направление интересно, могу отправить пример и примерную стоимость. Если вопрос решает администратор или владелец, буду благодарен, если подскажете контакт.`;
 
 function normalizeSearchInput(value: string) {
   const normalized = value.trim();
@@ -227,6 +234,9 @@ export function LeadWorkspace() {
   const [templateOpen, setTemplateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Lead | null>(null);
   const [messageTemplate, setMessageTemplate] = useState(defaultTemplate);
+  const [followUpTemplate, setFollowUpTemplate] = useState(
+    defaultFollowUpTemplate,
+  );
   const [importForm, setImportForm] = useState<ImportForm>({
     apiKey: "",
     city: "Кызылорда",
@@ -268,6 +278,10 @@ export function LeadWorkspace() {
     void loadLeads();
     const savedTemplate = window.localStorage.getItem(templateStorageKey);
     if (savedTemplate) setMessageTemplate(savedTemplate);
+    const savedFollowUpTemplate = window.localStorage.getItem(
+      followUpTemplateStorageKey,
+    );
+    if (savedFollowUpTemplate) setFollowUpTemplate(savedFollowUpTemplate);
     const savedAutomation = window.localStorage.getItem(automationStorageKey);
     if (!savedAutomation) return;
     try {
@@ -478,13 +492,17 @@ export function LeadWorkspace() {
   }
 
   function openTemplate() {
-    templateSnapshot.current = messageTemplate;
+    templateSnapshot.current = JSON.stringify({
+      messageTemplate,
+      followUpTemplate,
+    });
     setTemplateOpen(true);
   }
 
   function requestCloseTemplate() {
     if (
-      messageTemplate !== templateSnapshot.current &&
+      JSON.stringify({ messageTemplate, followUpTemplate }) !==
+        templateSnapshot.current &&
       !window.confirm("Закрыть шаблон без сохранения изменений?")
     )
       return;
@@ -596,7 +614,10 @@ export function LeadWorkspace() {
       );
       return;
     }
-    const text = messageTemplate
+    const template = lead.lastContactedAt
+      ? followUpTemplate
+      : messageTemplate;
+    const text = template
       .replaceAll("{name}", lead.name)
       .replaceAll("{city}", lead.city || "вашем городе");
     window.open(
@@ -738,9 +759,16 @@ export function LeadWorkspace() {
 
   function saveTemplate() {
     window.localStorage.setItem(templateStorageKey, messageTemplate);
-    templateSnapshot.current = messageTemplate;
+    window.localStorage.setItem(
+      followUpTemplateStorageKey,
+      followUpTemplate,
+    );
+    templateSnapshot.current = JSON.stringify({
+      messageTemplate,
+      followUpTemplate,
+    });
     setTemplateOpen(false);
-    setSyncNotice("Шаблон WhatsApp сохранён в этом браузере.");
+    setSyncNotice("Шаблоны WhatsApp сохранены в этом браузере.");
   }
 
   function resetFilters() {
@@ -1563,27 +1591,30 @@ export function LeadWorkspace() {
 
       <Dialog
         open={templateOpen}
-        title="Шаблон WhatsApp"
-        description="LeadPilot подставит название и город, затем откроет готовый текст в WhatsApp."
+        title="Шаблоны WhatsApp"
+        description="При первом контакте LeadPilot использует основной текст, при следующем — повторный. Название и город подставляются автоматически."
         onClose={requestCloseTemplate}
         size="large"
         footer={
           <>
             <button
               className="button"
-              onClick={() => setMessageTemplate(defaultTemplate)}
+              onClick={() => {
+                setMessageTemplate(defaultTemplate);
+                setFollowUpTemplate(defaultFollowUpTemplate);
+              }}
             >
-              Вернуть исходный
+              Вернуть исходные
             </button>
             <button className="button primary" onClick={saveTemplate}>
-              Сохранить шаблон
+              Сохранить шаблоны
             </button>
           </>
         }
       >
         <div className="template-layout">
           <div className="form-group">
-            <label htmlFor="message-template">Текст сообщения</label>
+            <label htmlFor="message-template">Первое сообщение</label>
             <textarea
               id="message-template"
               className="textarea template-textarea"
@@ -1595,10 +1626,31 @@ export function LeadWorkspace() {
             </span>
           </div>
           <aside className="template-preview">
-            <span>Предпросмотр</span>
+            <span>Предпросмотр первого сообщения</span>
             <p>
               {messageTemplate
                 .replaceAll("{name}", "Пример Кафе")
+                .replaceAll("{city}", "Кызылорда")}
+            </p>
+          </aside>
+          <div className="form-group">
+            <label htmlFor="follow-up-template">Повторное сообщение</label>
+            <textarea
+              id="follow-up-template"
+              className="textarea template-textarea"
+              value={followUpTemplate}
+              onChange={(event) => setFollowUpTemplate(event.target.value)}
+            />
+            <span className="field-hint">
+              Используется, если клиенту уже писали. Переменные:{" "}
+              <code>{"{name}"}</code> <code>{"{city}"}</code>
+            </span>
+          </div>
+          <aside className="template-preview">
+            <span>Предпросмотр повторного сообщения</span>
+            <p>
+              {followUpTemplate
+                .replaceAll("{name}", "Carla`s Cake")
                 .replaceAll("{city}", "Кызылорда")}
             </p>
           </aside>

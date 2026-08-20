@@ -1,3 +1,0 @@
-/* Route-level fallback keeps the complete LeadPilot design attached to the
-   Threads bundle even when a browser retains an older root stylesheet. */
-@import "../globals.css";

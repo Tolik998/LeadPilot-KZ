@@ -1087,7 +1087,7 @@ textarea:disabled {
   gap: 18px;
 }
 .template-textarea {
-  min-height: 300px;
+  min-height: 240px;
 }
 .template-preview {
   padding: 18px;

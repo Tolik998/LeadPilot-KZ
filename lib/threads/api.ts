@@ -7,15 +7,50 @@ import { getThreadsSettingsRow } from "./data";
 
 const graphBase = process.env.THREADS_GRAPH_URL || "https://graph.threads.net/v1.0";
 
+type GraphApiError = {
+  message?: string;
+  code?: number;
+  error_subcode?: number;
+  type?: string;
+  fbtrace_id?: string;
+};
+
+function graphErrorMessage(error: GraphApiError | undefined, status: number) {
+  const original = error?.message || `Threads API вернул HTTP ${status}`;
+  if (
+    /API access blocked/i.test(original) ||
+    [10, 200].includes(error?.code || 0)
+  ) {
+    return "Meta заблокировала доступ приложения к Threads API. Переподключите аккаунт Threads; если ошибка останется, проверьте разрешения threads_content_publish и threads_manage_insights в Meta App Dashboard.";
+  }
+  if (status === 401 || error?.code === 190) {
+    return "Сессия Threads недействительна или истекла. Переподключите аккаунт Threads в настройках.";
+  }
+  return original;
+}
+
 export class ThreadsApiError extends Error {
   temporary: boolean;
   status: number;
+  code: number;
+  subcode: number;
+  authorizationBlocked: boolean;
 
-  constructor(message: string, status: number, temporary: boolean) {
-    super(message);
+  constructor(
+    error: GraphApiError | undefined,
+    status: number,
+    temporary: boolean,
+  ) {
+    super(graphErrorMessage(error, status));
     this.name = "ThreadsApiError";
     this.status = status;
     this.temporary = temporary;
+    this.code = error?.code || 0;
+    this.subcode = error?.error_subcode || 0;
+    this.authorizationBlocked =
+      status === 401 ||
+      [10, 190, 200].includes(this.code) ||
+      /API access blocked/i.test(error?.message || "");
   }
 }
 
@@ -26,11 +61,10 @@ async function graphPost(path: string, token: string, body: Record<string, strin
     body: new URLSearchParams({ ...body, access_token: token }),
     cache: "no-store",
   });
-  const payload = await response.json().catch(() => ({})) as { id?: string; error?: { message?: string; code?: number } };
+  const payload = await response.json().catch(() => ({})) as { id?: string; error?: GraphApiError };
   if (!response.ok || payload.error) {
-    const message = payload.error?.message || `Threads API вернул HTTP ${response.status}`;
     const temporary = response.status === 429 || response.status >= 500 || [1, 2, 4, 17, 32, 341, 613].includes(payload.error?.code || 0);
-    throw new ThreadsApiError(message, response.status, temporary);
+    throw new ThreadsApiError(payload.error, response.status, temporary);
   }
   return payload;
 }
@@ -40,11 +74,10 @@ async function graphGet(path: string, token: string) {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });
-  const payload = await response.json().catch(() => ({})) as Record<string, unknown> & { error?: { message?: string; code?: number } };
+  const payload = await response.json().catch(() => ({})) as Record<string, unknown> & { error?: GraphApiError };
   if (!response.ok || payload.error) {
-    const message = payload.error?.message || `Threads API вернул HTTP ${response.status}`;
     const temporary = response.status === 429 || response.status >= 500 || [1, 2, 4, 17, 32, 341, 613].includes(payload.error?.code || 0);
-    throw new ThreadsApiError(message, response.status, temporary);
+    throw new ThreadsApiError(payload.error, response.status, temporary);
   }
   return payload;
 }
@@ -85,13 +118,12 @@ export async function publishDraft(publicationId: number, queueId: number | null
 
   for (let index = publishedIds.length; index < messages.length; index += 1) {
     const text = messages[index].replaceAll("{tracking_url}", link || "").trim();
-    const container = await graphPost(`${settings.threadsUserId}/threads`, token, {
+    const published = await graphPost("me/threads", token, {
       media_type: "TEXT",
       text,
+      auto_publish_text: "true",
       ...(replyToId ? { reply_to_id: replyToId } : {}),
     });
-    if (!container.id) throw new Error("Threads API не вернул ID контейнера публикации");
-    const published = await graphPost(`${settings.threadsUserId}/threads_publish`, token, { creation_id: container.id });
     if (!published.id) throw new Error("Threads API не вернул ID опубликованного сообщения");
     publishedIds.push(published.id);
     replyToId = published.id;
@@ -159,7 +191,20 @@ export async function processQueue(options: { queueId?: number; origin: string; 
         lastError: message.slice(0, 2000),
         updatedAt: new Date().toISOString(),
       }).where(eq(threadsDrafts.id, item.publicationId));
-      await logResult(item.publicationId, item.id, "error", retry ? "publish_retry" : "publish_failed", message, { attempts, nextAttemptAt });
+      await logResult(
+        item.publicationId,
+        item.id,
+        "error",
+        retry ? "publish_retry" : "publish_failed",
+        message,
+        {
+          attempts,
+          nextAttemptAt,
+          ...(error instanceof ThreadsApiError
+            ? { status: error.status, code: error.code, subcode: error.subcode }
+            : {}),
+        },
+      );
       results.push({ id: item.id, ok: false, retry, error: message });
     }
   }
@@ -206,7 +251,19 @@ export async function syncInsights(limit = 20, staleOnly = false) {
       }).where(eq(threadsAnalytics.id, row.analytics.id));
       synced += 1;
     } catch (error) {
-      await logResult(row.post.id, null, "error", "insights_sync_failed", error instanceof Error ? error.message : "Ошибка синхронизации аналитики");
+      await logResult(
+        row.post.id,
+        null,
+        "error",
+        "insights_sync_failed",
+        error instanceof Error ? error.message : "Ошибка синхронизации аналитики",
+        error instanceof ThreadsApiError
+          ? { status: error.status, code: error.code, subcode: error.subcode }
+          : {},
+      );
+      if (error instanceof ThreadsApiError && error.authorizationBlocked) {
+        throw error;
+      }
     }
   }
   return { synced };

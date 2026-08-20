@@ -263,14 +263,15 @@ export function AppShell({
   );
 
   return (
-    <div
-      className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}
-      ref={scope}
-    >
+    <>
       <a className="skip-link" href="#main-content">
         К основному содержанию
       </a>
-      <aside className="sidebar" aria-label="Основная навигация">
+      <div
+        className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}
+        ref={scope}
+      >
+        <aside className="sidebar" aria-label="Основная навигация">
         <Link
           className="brand"
           href="/"
@@ -325,13 +326,13 @@ export function AppShell({
           <Icon name={collapsed ? "chevron-right" : "chevron-left"} />
           <span>Свернуть</span>
         </button>
-      </aside>
+        </aside>
 
-      <main className="main" id="main-content" tabIndex={-1} data-page-reveal>
-        {children}
-      </main>
+        <main className="main" id="main-content" tabIndex={-1} data-page-reveal>
+          {children}
+        </main>
 
-      <nav className="mobile-nav" aria-label="Мобильная навигация">
+        <nav className="mobile-nav" aria-label="Мобильная навигация">
         <Link
           className={active === "leads" ? "active" : ""}
           href="/"
@@ -370,8 +371,9 @@ export function AppShell({
             <span>Экспорт</span>
           </Link>
         )}
-      </nav>
-    </div>
+        </nav>
+      </div>
+    </>
   );
 }
 
