@@ -121,6 +121,7 @@ const statusOrder: Status[] = [
 ];
 
 const contactedStatuses = new Set<Status>(["contacted", "contacted2", "contacted3"]);
+const allContactedFilter = "contacted_all";
 
 const nextContactStatus: Record<Status, Status> = {
   new: "contacted",
@@ -399,7 +400,7 @@ export function LeadWorkspace() {
         minReviewsFilter === 0 || lead.reviewsCount >= minReviewsFilter;
       const matchesStatus =
         statusFilter === "all" ||
-        (statusFilter === "contacted"
+        (statusFilter === allContactedFilter
           ? contactedStatuses.has(lead.status)
           : lead.status === statusFilter);
       return (
@@ -448,7 +449,10 @@ export function LeadWorkspace() {
     if (statusFilter !== "all")
       result.push({
         key: "status",
-        label: `Статус: ${statusLabels[statusFilter as Status]}`,
+        label:
+          statusFilter === allContactedFilter
+            ? "Статус: все написанные"
+            : `Статус: ${statusLabels[statusFilter as Status]}`,
         clear: () => setStatusFilter("all"),
       });
     if (cityFilter !== "all")
@@ -1003,6 +1007,7 @@ export function LeadWorkspace() {
               onChange={(event) => setStatusFilter(event.target.value)}
             >
               <option value="all">Все статусы</option>
+              <option value={allContactedFilter}>Все написанные (1–3)</option>
               {Object.entries(statusLabels).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
