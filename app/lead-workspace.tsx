@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { selectOutreachTemplate } from "../lib/outreach";
 import { AppShell, ConfirmDialog, Dialog, FeedbackBanner, Icon } from "./ui";
 
 type Status =
@@ -120,6 +121,7 @@ const statusOrder: Status[] = [
 ];
 
 const contactedStatuses = new Set<Status>(["contacted", "contacted2", "contacted3"]);
+const allContactedFilter = "contacted_all";
 
 const nextContactStatus: Record<Status, Status> = {
   new: "contacted",
@@ -395,14 +397,16 @@ export function LeadWorkspace() {
           .toLowerCase()
           .includes(needle);
       const matchesReviews =
-        lead.status !== "new" ||
-        minReviewsFilter === 0 ||
-        lead.reviewsCheckedAt == null ||
-        lead.reviewsCount >= minReviewsFilter;
+        minReviewsFilter === 0 || lead.reviewsCount >= minReviewsFilter;
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === allContactedFilter
+          ? contactedStatuses.has(lead.status)
+          : lead.status === statusFilter);
       return (
         matchesSearch &&
         matchesReviews &&
-        (statusFilter === "all" || lead.status === statusFilter) &&
+        matchesStatus &&
         (cityFilter === "all" || lead.city === cityFilter)
       );
     });
@@ -445,7 +449,10 @@ export function LeadWorkspace() {
     if (statusFilter !== "all")
       result.push({
         key: "status",
-        label: `Статус: ${statusLabels[statusFilter as Status]}`,
+        label:
+          statusFilter === allContactedFilter
+            ? "Статус: все написанные"
+            : `Статус: ${statusLabels[statusFilter as Status]}`,
         clear: () => setStatusFilter("all"),
       });
     if (cityFilter !== "all")
@@ -650,9 +657,11 @@ export function LeadWorkspace() {
       );
       return;
     }
-    const template = lead.lastContactedAt
-      ? followUpTemplate
-      : messageTemplate;
+    const template = selectOutreachTemplate(
+      lead.status,
+      messageTemplate,
+      followUpTemplate,
+    );
     const text = template
       .replaceAll("{name}", lead.name)
       .replaceAll("{city}", lead.city || "вашем городе");
@@ -998,6 +1007,7 @@ export function LeadWorkspace() {
               onChange={(event) => setStatusFilter(event.target.value)}
             >
               <option value="all">Все статусы</option>
+              <option value={allContactedFilter}>Все написанные (1–3)</option>
               {Object.entries(statusLabels).map(([value, label]) => (
                 <option key={value} value={value}>
                   {label}
@@ -1019,7 +1029,7 @@ export function LeadWorkspace() {
             </select>
           </label>
           <label>
-            <span className="sr-only">Фильтр новых заведений по отзывам</span>
+            <span className="sr-only">Фильтр по количеству отзывов</span>
             <select
               className="select"
               value={minReviewsFilter}
