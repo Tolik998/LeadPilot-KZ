@@ -61,6 +61,8 @@ type SearchSort = "creation_time" | "relevance" | "rating" | "name";
 const automationStorageKey = "leadpilot-2gis-automation";
 const templateStorageKey = "leadpilot-message-template-v5";
 const followUpTemplateStorageKey = "leadpilot-follow-up-template-v1";
+const previousPortfolioUrl = "https://tuysqan.vercel.app";
+const portfolioUrl = "https://portfolio-nu-roan-17.vercel.app/#top";
 const defaultSearchQueries = [
   "кафе",
   "ресторан",
@@ -133,7 +135,7 @@ const nextContactStatus: Record<Status, Status> = {
 const defaultTemplate = `Здравствуйте. Посмотрел ваше заведение «{name}» и хотел предложить удобный сайт для онлайн-заказов: актуальное меню, корзина, заказ через WhatsApp, QR-меню для столов и админ-панель, в которой можно менять меню и информацию.
 
 Вот пример сайта, который я уже сделал для ресторана:
-https://tuysqan.vercel.app
+${portfolioUrl}
 
 Могу бесплатно показать весь функционал за 5 минут и предложить вариант под ваше заведение. Разработка быстрая и по доступной цене.
 
@@ -302,7 +304,16 @@ export function LeadWorkspace() {
   useEffect(() => {
     void loadLeads();
     const savedTemplate = window.localStorage.getItem(templateStorageKey);
-    if (savedTemplate) setMessageTemplate(savedTemplate);
+    if (savedTemplate) {
+      const migratedTemplate = savedTemplate.replaceAll(
+        previousPortfolioUrl,
+        portfolioUrl,
+      );
+      setMessageTemplate(migratedTemplate);
+      if (migratedTemplate !== savedTemplate) {
+        window.localStorage.setItem(templateStorageKey, migratedTemplate);
+      }
+    }
     const savedFollowUpTemplate = window.localStorage.getItem(
       followUpTemplateStorageKey,
     );
