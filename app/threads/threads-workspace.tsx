@@ -1527,11 +1527,18 @@ function PlanBlock({
   posts: Post[];
   onEdit: (post: Post) => void;
 }) {
-  const grouped = posts.reduce((map, post) => {
-    const key = (post.plannedFor || post.createdAt).slice(0, 10);
-    map.set(key, [...(map.get(key) || []), post]);
-    return map;
-  }, new Map<string, Post[]>());
+  const grouped = [...posts]
+    .sort((left, right) => {
+      const byDate = (left.plannedFor || left.createdAt).localeCompare(
+        right.plannedFor || right.createdAt,
+      );
+      return byDate || left.id - right.id;
+    })
+    .reduce((map, post) => {
+      const key = (post.plannedFor || post.createdAt).slice(0, 10);
+      map.set(key, [...(map.get(key) || []), post]);
+      return map;
+    }, new Map<string, Post[]>());
   return (
     <div className="threads-card plan-block">
       <div className="list-heading">
