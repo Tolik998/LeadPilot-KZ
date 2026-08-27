@@ -24,8 +24,46 @@ type RegionResponse = {
 
 type RubricResponse = {
   meta?: ApiMeta;
-  result?: { items?: Rubric[] };
+  result?: { items?: Rubric[]; total?: number };
 };
+
+type JsonResponse<T> = {
+  response: Response;
+  data: T;
+};
+
+const TWO_GIS_TIMEOUT_MS = 20_000;
+const TWO_GIS_MAX_ATTEMPTS = 2;
+const RUBRIC_PAGE_SIZE = 50;
+const RUBRIC_MAX_PAGES = 100;
+
+class TwoGisTransportError extends Error {}
+
+async function fetch2GisJson<T>(url: URL): Promise<JsonResponse<T>> {
+  for (let attempt = 1; attempt <= TWO_GIS_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "Accept-Encoding": "identity",
+        },
+        cache: "no-store",
+        signal: AbortSignal.timeout(TWO_GIS_TIMEOUT_MS),
+      });
+      const body = await response.text();
+      const data = JSON.parse(body) as T;
+      return { response, data };
+    } catch {
+      if (attempt < TWO_GIS_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+  }
+
+  throw new TwoGisTransportError(
+    "2ГИС прервал загрузку справочника категорий. Повторите попытку через несколько секунд.",
+  );
+}
 
 function apiError(meta: ApiMeta | undefined, fallback: string) {
   const original = meta?.error?.message?.trim();
@@ -55,11 +93,8 @@ export async function POST(request: Request) {
     regionUrl.searchParams.set("q", city);
     regionUrl.searchParams.set("locale", "ru_KZ");
     regionUrl.searchParams.set("key", apiKey);
-    const regionResponse = await fetch(regionUrl, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
-    const regionData = (await regionResponse.json()) as RegionResponse;
+    const { response: regionResponse, data: regionData } =
+      await fetch2GisJson<RegionResponse>(regionUrl);
     if (!regionResponse.ok || regionData.meta?.code !== 200) {
       return Response.json(
         { error: apiError(regionData.meta, "2ГИС не смог определить регион для выбранного города") },
@@ -78,27 +113,41 @@ export async function POST(request: Request) {
     const rubricUrl = new URL("https://catalog.api.2gis.com/2.0/catalog/rubric/list");
     rubricUrl.searchParams.set("region_id", regionId);
     rubricUrl.searchParams.set("fields", "items.rubrics");
-    rubricUrl.searchParams.set("page_size", "10000");
+    rubricUrl.searchParams.set("page_size", String(RUBRIC_PAGE_SIZE));
     rubricUrl.searchParams.set("sort", "name");
     rubricUrl.searchParams.set("locale", "ru_KZ");
     rubricUrl.searchParams.set("key", apiKey);
-    const rubricResponse = await fetch(rubricUrl, {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    });
-    const rubricData = (await rubricResponse.json()) as RubricResponse;
-    if (!rubricResponse.ok || rubricData.meta?.code !== 200) {
-      return Response.json(
-        { error: apiError(rubricData.meta, "2ГИС не вернул список категорий") },
-        { status: rubricResponse.status >= 400 ? rubricResponse.status : 502 },
-      );
+    const rubricGroups: Rubric[] = [];
+    for (let page = 1; page <= RUBRIC_MAX_PAGES; page += 1) {
+      rubricUrl.searchParams.set("page", String(page));
+      const { response: rubricResponse, data: rubricData } =
+        await fetch2GisJson<RubricResponse>(rubricUrl);
+      if (!rubricResponse.ok || rubricData.meta?.code !== 200) {
+        return Response.json(
+          { error: apiError(rubricData.meta, "2ГИС не вернул список категорий") },
+          { status: rubricResponse.status >= 400 ? rubricResponse.status : 502 },
+        );
+      }
+
+      const pageItems = rubricData.result?.items || [];
+      rubricGroups.push(...pageItems);
+      const total = rubricData.result?.total;
+      if (
+        pageItems.length < RUBRIC_PAGE_SIZE ||
+        (typeof total === "number" && rubricGroups.length >= total)
+      ) {
+        break;
+      }
+      if (page === RUBRIC_MAX_PAGES) {
+        throw new Error("2ГИС вернул слишком большой справочник категорий");
+      }
     }
 
     const unique = new Map<
       string,
       { id: string; name: string; parentName: string }
     >();
-    for (const group of rubricData.result?.items || []) {
+    for (const group of rubricGroups) {
       const parentName = rubricName(group);
       const children = Array.isArray(group.rubrics) ? group.rubrics : [];
       const rubrics = children.length ? children : group.type === "rubric" ? [group] : [];
@@ -124,11 +173,13 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error:
-          error instanceof Error
+          error instanceof TwoGisTransportError
+            ? error.message
+            : error instanceof Error
             ? error.message
             : "Не удалось загрузить категории 2ГИС",
       },
-      { status: 500 },
+      { status: error instanceof TwoGisTransportError ? 502 : 500 },
     );
   }
 }
