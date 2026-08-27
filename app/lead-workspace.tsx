@@ -1691,7 +1691,7 @@ export function LeadWorkspace() {
                   type="search"
                   value={categorySearch}
                   onChange={(event) => setCategorySearch(event.target.value)}
-                  placeholder="Например: пицца, казахская кухня, доставка"
+                  placeholder="Например: автосервис, маникюр, стоматология"
                 />
               </label>
               <div className="dgis-category-actions">
