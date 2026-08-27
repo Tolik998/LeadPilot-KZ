@@ -2,6 +2,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  dgisCategories,
+  dgisCategorySections,
+  restoreDgisCategories,
+  type DgisCategory,
+} from "../lib/dgis-categories";
 import { selectOutreachTemplate } from "../lib/outreach";
 import { AppShell, ConfirmDialog, Dialog, FeedbackBanner, Icon } from "./ui";
 
@@ -40,12 +46,6 @@ type LeadDraft = Omit<
   Lead,
   "id" | "createdAt" | "lastContactedAt" | "reviewsCount" | "reviewsCheckedAt"
 >;
-
-type DgisCategory = {
-  id: string;
-  name: string;
-  parentName: string;
-};
 
 type ImportForm = {
   apiKey: string;
@@ -200,8 +200,8 @@ function searchJob(form: ImportForm, cursor: number) {
   const category = categories[queryIndex];
   return {
     query: category.name,
-    rubricId: category.id,
-    regionId: category.id ? form.regionId : "",
+    rubricId: "",
+    regionId: "",
     sort: searchSorts[sortIndex],
     nextCursor: (safeCursor + 1) % totalJobs,
   };
@@ -296,11 +296,7 @@ export function LeadWorkspace() {
     pages: 5,
     minReviews: 50,
   });
-  const [dgisCategories, setDgisCategories] = useState<DgisCategory[]>([]);
   const [categorySearch, setCategorySearch] = useState("");
-  const [categoriesLoading, setCategoriesLoading] = useState(false);
-  const [categoriesError, setCategoriesError] = useState("");
-  const [categoriesCity, setCategoriesCity] = useState("");
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [searchCursor, setSearchCursor] = useState(0);
@@ -356,22 +352,8 @@ export function LeadWorkspace() {
         apiKey: settings.apiKey || "",
         city: settings.city || "Кызылорда",
         query: normalizeSearchInput(settings.query || defaultSearchQuery),
-        regionId:
-          typeof settings.regionId === "string" && /^\d+$/.test(settings.regionId)
-            ? settings.regionId
-            : "",
-        categories: Array.isArray(settings.categories)
-          ? settings.categories.filter(
-              (category): category is DgisCategory =>
-                Boolean(
-                  category &&
-                    typeof category.id === "string" &&
-                    /^\d+$/.test(category.id) &&
-                    typeof category.name === "string" &&
-                    category.name.trim(),
-                ),
-            )
-          : [],
+        regionId: "",
+        categories: restoreDgisCategories(settings.categories),
         pages: Math.max(1, Math.min(5, Number(settings.pages) || 5)),
         minReviews: Math.max(
           0,
@@ -431,21 +413,29 @@ export function LeadWorkspace() {
     [leads],
   );
 
-  const filteredDgisCategories = useMemo(() => {
+  const filteredDgisCategorySections = useMemo(() => {
     const needle = categorySearch.trim().toLocaleLowerCase("ru");
-    if (!needle) return dgisCategories;
-    return dgisCategories.filter((category) =>
-      `${category.name} ${category.parentName}`
-        .toLocaleLowerCase("ru")
-        .includes(needle),
-    );
-  }, [categorySearch, dgisCategories]);
+    if (!needle) return dgisCategorySections;
+    return dgisCategorySections
+      .map((section) => ({
+        ...section,
+        categories: section.categories.filter((category) =>
+          `${category.name} ${category.parentName}`
+            .toLocaleLowerCase("ru")
+            .includes(needle),
+        ),
+      }))
+      .filter((section) => section.categories.length > 0);
+  }, [categorySearch]);
+  const filteredDgisCategories = useMemo(
+    () =>
+      filteredDgisCategorySections.flatMap((section) => section.categories),
+    [filteredDgisCategorySections],
+  );
   const selectedDgisCategoryIds = useMemo(
     () => new Set(importForm.categories.map((category) => category.id)),
     [importForm.categories],
   );
-  const visibleDgisCategories = filteredDgisCategories.slice(0, 120);
-
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const matches = leads.filter((lead) => {
@@ -581,13 +571,6 @@ export function LeadWorkspace() {
   function openImport() {
     importSnapshot.current = JSON.stringify({ importForm, autoSyncEnabled });
     setImportOpen(true);
-    if (
-      importForm.apiKey.trim() &&
-      importForm.city.trim() &&
-      (!dgisCategories.length || categoriesCity !== importForm.city.trim())
-    ) {
-      void loadDgisCategories(importForm);
-    }
   }
 
   function requestCloseImport() {
@@ -598,61 +581,6 @@ export function LeadWorkspace() {
     )
       return;
     setImportOpen(false);
-  }
-
-  async function loadDgisCategories(sourceForm: ImportForm = importForm) {
-    const apiKey = sourceForm.apiKey.trim();
-    const city = sourceForm.city.trim();
-    if (!apiKey) {
-      setCategoriesError("Сначала укажите API-ключ 2ГИС");
-      document.getElementById("dgis-key")?.focus();
-      return;
-    }
-    if (!city) {
-      setCategoriesError("Укажите город, для которого нужно загрузить рубрики");
-      document.getElementById("dgis-city")?.focus();
-      return;
-    }
-    setCategoriesLoading(true);
-    setCategoriesError("");
-    try {
-      const response = await fetch("/api/import/2gis/categories", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey, city }),
-      });
-      const data = (await response.json()) as {
-        error?: string;
-        regionId?: string;
-        categories?: DgisCategory[];
-      };
-      if (!response.ok) {
-        throw new Error(data.error || "Не удалось загрузить категории 2ГИС");
-      }
-      const categories = Array.isArray(data.categories) ? data.categories : [];
-      const availableIds = new Set(categories.map((category) => category.id));
-      setDgisCategories(categories);
-      setCategoriesCity(city);
-      setImportForm((current) => ({
-        ...current,
-        regionId: data.regionId || "",
-        categories:
-          current.regionId === data.regionId
-            ? current.categories.filter((category) => availableIds.has(category.id))
-            : [],
-      }));
-      if (!categories.length) {
-        setCategoriesError(`Для города «${city}» категории не найдены`);
-      }
-    } catch (loadError) {
-      setCategoriesError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Не удалось загрузить категории 2ГИС",
-      );
-    } finally {
-      setCategoriesLoading(false);
-    }
   }
 
   function toggleDgisCategory(category: DgisCategory) {
@@ -674,6 +602,22 @@ export function LeadWorkspace() {
       );
       for (const category of filteredDgisCategories) {
         selected.set(category.id, category);
+      }
+      return { ...current, categories: [...selected.values()] };
+    });
+  }
+
+  function selectDgisCategorySection(categories: DgisCategory[]) {
+    setImportForm((current) => {
+      const selected = new Map(
+        current.categories.map((category) => [category.id, category]),
+      );
+      const sectionIsSelected = categories.every((category) =>
+        selected.has(category.id),
+      );
+      for (const category of categories) {
+        if (sectionIsSelected) selected.delete(category.id);
+        else selected.set(category.id, category);
       }
       return { ...current, categories: [...selected.values()] };
     });
@@ -1696,13 +1640,7 @@ export function LeadWorkspace() {
                 setImportForm({
                   ...importForm,
                   city: event.target.value,
-                  regionId: "",
-                  categories: [],
                 });
-                setDgisCategories([]);
-                setCategorySearch("");
-                setCategoriesCity("");
-                setCategoriesError("");
               }}
             />
           </div>
@@ -1732,139 +1670,129 @@ export function LeadWorkspace() {
                 <strong>
                   {importForm.categories.length
                     ? `Выбрано: ${importForm.categories.length}`
-                    : "Выберите категории из справочника 2ГИС"}
+                    : "Выберите категории для поиска"}
                 </strong>
                 <span>
-                  Список зависит от города. Автосбор проверяет по одной категории
-                  и сортировке за запуск.
+                  Встроенный список не загружается из 2ГИС. Проверяется по одной
+                  категории и сортировке за запуск; отсутствие результатов — не ошибка.
                 </span>
               </div>
-              <button
-                className="button"
-                type="button"
-                disabled={categoriesLoading || !importForm.apiKey.trim()}
-                onClick={() => void loadDgisCategories()}
-              >
-                {categoriesLoading
-                  ? "Загружаю…"
-                  : dgisCategories.length
-                    ? "Обновить список"
-                    : "Загрузить категории"}
-              </button>
+              <span className="dgis-category-total">
+                {dgisCategories.length} вариантов
+              </span>
             </div>
 
-            {categoriesError && (
-              <p className="dgis-category-error" role="alert">
-                {categoriesError}
-              </p>
-            )}
-
-            {dgisCategories.length > 0 ? (
-              <div className="dgis-category-content">
-                <label className="dgis-category-search" htmlFor="dgis-category-search">
-                  <span>Поиск по всем категориям</span>
-                  <input
-                    id="dgis-category-search"
-                    className="field"
-                    type="search"
-                    value={categorySearch}
-                    onChange={(event) => setCategorySearch(event.target.value)}
-                    placeholder="Например: стоматология, мебель, доставка"
-                  />
-                </label>
-                <div className="dgis-category-actions">
-                  <span aria-live="polite">
-                    Найдено: {filteredDgisCategories.length}
-                  </span>
-                  <button
-                    className="text-button"
-                    type="button"
-                    disabled={!filteredDgisCategories.length}
-                    onClick={selectVisibleDgisCategories}
-                  >
-                    Выбрать найденные
-                  </button>
-                  <button
-                    className="text-button"
-                    type="button"
-                    disabled={!importForm.categories.length}
-                    onClick={() =>
-                      setImportForm((current) => ({
-                        ...current,
-                        categories: [],
-                      }))
-                    }
-                  >
-                    Снять выбор
-                  </button>
-                </div>
-
-                {importForm.categories.length > 0 && (
-                  <div className="dgis-selected-categories" aria-label="Выбранные категории">
-                    {importForm.categories.slice(0, 8).map((category) => (
-                      <button
-                        key={category.id}
-                        type="button"
-                        onClick={() => toggleDgisCategory(category)}
-                        title={`Убрать «${category.name}»`}
-                      >
-                        <span>{category.name}</span>
-                        <span aria-hidden="true">×</span>
-                      </button>
-                    ))}
-                    {importForm.categories.length > 8 && (
-                      <span className="dgis-selection-more">
-                        +{importForm.categories.length - 8}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                <div
-                  className="dgis-category-list"
-                  role="group"
-                  aria-label="Категории 2ГИС"
+            <div className="dgis-category-content">
+              <label className="dgis-category-search" htmlFor="dgis-category-search">
+                <span>Поиск по встроенному списку</span>
+                <input
+                  id="dgis-category-search"
+                  className="field"
+                  type="search"
+                  value={categorySearch}
+                  onChange={(event) => setCategorySearch(event.target.value)}
+                  placeholder="Например: пицца, казахская кухня, доставка"
+                />
+              </label>
+              <div className="dgis-category-actions">
+                <span aria-live="polite">
+                  Найдено: {filteredDgisCategories.length}
+                </span>
+                <button
+                  className="text-button"
+                  type="button"
+                  disabled={!filteredDgisCategories.length}
+                  onClick={selectVisibleDgisCategories}
                 >
-                  {visibleDgisCategories.map((category) => (
-                    <label key={category.id} className="dgis-category-option">
-                      <input
-                        type="checkbox"
-                        checked={selectedDgisCategoryIds.has(category.id)}
-                        onChange={() => toggleDgisCategory(category)}
-                      />
-                      <span>
-                        <strong>{category.name}</strong>
-                        {category.parentName && <small>{category.parentName}</small>}
-                      </span>
-                    </label>
+                  Выбрать найденные
+                </button>
+                <button
+                  className="text-button"
+                  type="button"
+                  disabled={!importForm.categories.length}
+                  onClick={() =>
+                    setImportForm((current) => ({
+                      ...current,
+                      categories: [],
+                    }))
+                  }
+                >
+                  Снять выбор
+                </button>
+              </div>
+
+              {importForm.categories.length > 0 && (
+                <div className="dgis-selected-categories" aria-label="Выбранные категории">
+                  {importForm.categories.slice(0, 8).map((category) => (
+                    <button
+                      key={category.id}
+                      type="button"
+                      onClick={() => toggleDgisCategory(category)}
+                      title={`Убрать «${category.name}»`}
+                    >
+                      <span>{category.name}</span>
+                      <span aria-hidden="true">×</span>
+                    </button>
                   ))}
-                  {!visibleDgisCategories.length && (
-                    <p className="dgis-category-empty">
-                      Совпадений нет. Измените текст поиска.
-                    </p>
+                  {importForm.categories.length > 8 && (
+                    <span className="dgis-selection-more">
+                      +{importForm.categories.length - 8}
+                    </span>
                   )}
                 </div>
-                {filteredDgisCategories.length > visibleDgisCategories.length && (
-                  <span className="field-hint">
-                    Показаны первые {visibleDgisCategories.length} из {filteredDgisCategories.length}.
-                    Уточните поиск, чтобы увидеть нужную рубрику. Кнопка «Выбрать найденные»
-                    применяет все {filteredDgisCategories.length} результатов.
-                  </span>
+              )}
+
+              <div className="dgis-category-list" aria-label="Категории для поиска">
+                {filteredDgisCategorySections.map((section) => {
+                  const sectionIsSelected = section.categories.every((category) =>
+                    selectedDgisCategoryIds.has(category.id),
+                  );
+                  return (
+                    <section className="dgis-category-section" key={section.id}>
+                      <div className="dgis-category-section-heading">
+                        <div>
+                          <strong>{section.name}</strong>
+                          <span>{section.categories.length}</span>
+                        </div>
+                        <button
+                          className="text-button"
+                          type="button"
+                          aria-pressed={sectionIsSelected}
+                          onClick={() => selectDgisCategorySection(section.categories)}
+                        >
+                          {sectionIsSelected ? "Снять раздел" : "Выбрать раздел"}
+                        </button>
+                      </div>
+                      <div className="dgis-category-options" role="group" aria-label={section.name}>
+                        {section.categories.map((category) => (
+                          <label key={category.id} className="dgis-category-option">
+                            <input
+                              type="checkbox"
+                              aria-label={category.name}
+                              checked={selectedDgisCategoryIds.has(category.id)}
+                              onChange={() => toggleDgisCategory(category)}
+                            />
+                            <span>
+                              <strong>{category.name}</strong>
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
+                {!filteredDgisCategorySections.length && (
+                  <p className="dgis-category-empty">
+                    Совпадений нет. Добавьте свою фразу ниже или измените поиск.
+                  </p>
                 )}
               </div>
-            ) : (
-              <div className="dgis-category-empty-state">
-                <span>После загрузки здесь появятся все рубрики выбранного города.</span>
-                <small>
-                  Пока используются сохранённые поисковые фразы: {importForm.query}.
-                </small>
-              </div>
-            )}
+            </div>
 
             <details className="dgis-manual-query">
               <summary>Ручные поисковые фразы</summary>
               <label htmlFor="dgis-query">
-                Используются, только если категории из справочника не выбраны
+                Используются, только если категории выше не выбраны
               </label>
               <input
                 id="dgis-query"
