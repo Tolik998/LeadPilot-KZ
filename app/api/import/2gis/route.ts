@@ -34,10 +34,12 @@ function contact(items: Contact[], types: string[]) {
 export async function POST(request: Request) {
   try {
     await ensureSchema();
-    const payload = (await request.json()) as { apiKey?: string; city?: string; query?: string; pages?: number; sort?: string; minReviews?: number };
+    const payload = (await request.json()) as { apiKey?: string; city?: string; query?: string; regionId?: string; rubricId?: string; pages?: number; sort?: string; minReviews?: number };
     const apiKey = payload.apiKey?.trim();
     const city = payload.city?.trim().slice(0, 100) || "Кызылорда";
     const query = payload.query?.trim().slice(0, 120) || "кафе ресторан";
+    const regionId = /^\d+$/.test(payload.regionId || "") ? payload.regionId! : "";
+    const rubricId = /^\d+$/.test(payload.rubricId || "") ? payload.rubricId! : "";
     const pages = Math.max(1, Math.min(5, Number(payload.pages) || 1));
     const minReviews = Math.max(0, Math.min(10000, Math.trunc(Number(payload.minReviews) || 0)));
     const sort = allowedSorts.has(payload.sort || "") ? payload.sort! : "creation_time";
@@ -46,9 +48,15 @@ export async function POST(request: Request) {
     const collected: Item[] = [];
     for (let page = 1; page <= pages; page += 1) {
       const url = new URL("https://catalog.api.2gis.com/3.0/items");
-      url.searchParams.set("q", `${query} ${city}`);
+      if (regionId && rubricId) {
+        url.searchParams.set("region_id", regionId);
+        url.searchParams.set("rubric_id", rubricId);
+      } else {
+        url.searchParams.set("q", `${query} ${city}`);
+      }
       url.searchParams.set("type", "branch");
       url.searchParams.set("has_site", "false");
+      url.searchParams.set("locale", "ru_KZ");
       url.searchParams.set("page_size", "10");
       url.searchParams.set("page", String(page));
       url.searchParams.set("sort", sort);
