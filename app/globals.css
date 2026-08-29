@@ -2593,8 +2593,22 @@ textarea:disabled {
   .plan-controls .button {
     margin-bottom: 0;
   }
+  .plan-autopost-toggle {
+    margin-top: 10px;
+  }
+  .plan-autopost-toggle.disabled {
+    cursor: not-allowed;
+    opacity: 0.64;
+  }
   .plan-block {
     overflow: hidden;
+  }
+  .plan-heading-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
   }
   .list-heading {
     display: flex;
@@ -3614,6 +3628,13 @@ textarea:disabled {
     }
     .list-heading {
       padding: 17px 16px;
+    }
+    .plan-block .list-heading {
+      flex-direction: column;
+    }
+    .plan-heading-actions {
+      width: 100%;
+      justify-content: flex-start;
     }
     .post-grid {
       padding: 10px;

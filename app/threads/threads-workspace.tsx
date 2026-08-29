@@ -96,6 +96,11 @@ type Plan = {
   startDate: string;
   createdAt: string;
 };
+type AutoPostResult = {
+  scheduled: number;
+  skippedPast: number;
+  alreadyQueued: number;
+};
 type Log = {
   id: number;
   publicationId: number | null;
@@ -209,6 +214,7 @@ export function ThreadsWorkspace() {
     startDate: today(),
     format: "single" as Format,
     goal: "reach" as Goal,
+    autoPost: true,
   });
 
   async function load(silent = false) {
@@ -306,15 +312,57 @@ export function ThreadsWorkspace() {
     setError("");
     setNotice("");
     try {
-      const result = await api<{ posts: Post[]; duplicateCount: number }>(
+      const result = await api<{
+        posts: Post[];
+        duplicateCount: number;
+        autoPost: AutoPostResult;
+      }>(
         "/api/threads/plans",
         {
           method: "POST",
-          body: JSON.stringify({ ...generation, ...planForm }),
+          body: JSON.stringify({
+            ...generation,
+            ...planForm,
+            autoPost: planForm.autoPost && settings.connected,
+          }),
         },
       );
+      const autoPostNote = result.autoPost.scheduled
+        ? ` В очередь поставлено: ${result.autoPost.scheduled}.`
+        : "";
+      const skippedNote = result.autoPost.skippedPast
+        ? ` Просроченные слоты оставлены в черновиках: ${result.autoPost.skippedPast}.`
+        : "";
       setNotice(
-        `План создан: ${result.posts.length} публикаций сохранены как черновики, повторов найдено: ${result.duplicateCount}.`,
+        `План создан: ${result.posts.length} публикаций, повторов найдено: ${result.duplicateCount}.${autoPostNote}${skippedNote}`,
+      );
+      await load(true);
+    } catch (actionError) {
+      showError(actionError);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function enablePlanAutoPost(plan: Plan) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api<{ autoPost: AutoPostResult }>(
+        "/api/threads/plans",
+        {
+          method: "PATCH",
+          body: JSON.stringify({ id: plan.id, action: "enable_autopost" }),
+        },
+      );
+      const { scheduled, skippedPast, alreadyQueued } = result.autoPost;
+      setNotice(
+        scheduled > 0
+          ? `Автопост включён: ${scheduled} публикаций добавлены в очередь.${skippedPast ? ` Просроченные публикации оставлены в черновиках: ${skippedPast}.` : ""}`
+          : alreadyQueued > 0
+            ? `Автопост уже активен: в очереди ${alreadyQueued} публикаций.`
+            : "В этом плане нет будущих черновиков для автопоста.",
       );
       await load(true);
     } catch (actionError) {
@@ -886,9 +934,34 @@ export function ThreadsWorkspace() {
                 >
                   {busy
                     ? "Собираю план…"
-                    : `Создать ${planForm.durationDays * planForm.postsPerDay} черновиков`}
+                    : planForm.autoPost && settings.connected
+                      ? "Создать план с автопостом"
+                      : `Создать ${planForm.durationDays * planForm.postsPerDay} черновиков`}
                 </button>
               </div>
+              <label
+                className={`automation-toggle plan-autopost-toggle ${!settings.connected ? "disabled" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={planForm.autoPost && settings.connected}
+                  disabled={!settings.connected}
+                  onChange={(event) =>
+                    setPlanForm({
+                      ...planForm,
+                      autoPost: event.target.checked,
+                    })
+                  }
+                />
+                <span>
+                  <strong>Автопостинг по контент-плану</strong>
+                  <small>
+                    {settings.connected
+                      ? "Будущие публикации сразу попадут в очередь и выйдут после наступления времени при ближайшем запуске cron."
+                      : "Сначала подключите аккаунт Threads в настройках — до этого план сохранится как черновики."}
+                  </small>
+                </span>
+              </label>
               <p className="hint">
                 Ниша, город и услуга берутся из формы «Создать публикацию».
                 Повторы тем проверяются до сохранения.
@@ -902,6 +975,9 @@ export function ThreadsWorkspace() {
                   (post) => post.contentPlanId === plan.id,
                 )}
                 onEdit={openEditor}
+                onEnableAutoPost={enablePlanAutoPost}
+                connected={settings.connected}
+                busy={busy}
               />
             ))}
             {!data?.plans.length && (
@@ -1522,11 +1598,25 @@ function PlanBlock({
   plan,
   posts,
   onEdit,
+  onEnableAutoPost,
+  connected,
+  busy,
 }: {
   plan: Plan;
   posts: Post[];
   onEdit: (post: Post) => void;
+  onEnableAutoPost: (plan: Plan) => void;
+  connected: boolean;
+  busy: boolean;
 }) {
+  const [renderedAt] = useState(() => Date.now());
+  const queuedCount = posts.filter((post) => post.status === "queued").length;
+  const futureDraftCount = posts.filter(
+    (post) =>
+      ["draft", "failed"].includes(post.status) &&
+      post.plannedFor &&
+      new Date(post.plannedFor).getTime() > renderedAt + 30_000,
+  ).length;
   const grouped = [...posts]
     .sort((left, right) => {
       const byDate = (left.plannedFor || left.createdAt).localeCompare(
@@ -1551,7 +1641,26 @@ function PlanBlock({
             {plan.postsPerDay} публикации в день · {posts.length} черновиков
           </p>
         </div>
-        <span className="signal">Активный план</span>
+        <div className="plan-heading-actions">
+          <span className={`signal ${queuedCount ? "good" : ""}`}>
+            {queuedCount ? `Автопост: ${queuedCount} в очереди` : "Активный план"}
+          </span>
+          {futureDraftCount > 0 && (
+            <button
+              className="button small"
+              type="button"
+              disabled={busy || !connected}
+              title={
+                connected
+                  ? "Поставить будущие публикации плана в очередь"
+                  : "Сначала подключите аккаунт Threads в настройках"
+              }
+              onClick={() => onEnableAutoPost(plan)}
+            >
+              {queuedCount ? "Добавить оставшиеся" : "Включить автопост"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="plan-days">
         {[...grouped.entries()].map(([date, items], dayIndex) => (

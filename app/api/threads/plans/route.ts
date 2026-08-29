@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { ensureSchema } from "../../../../db/runtime";
-import { threadsAnalytics, threadsContentPlans, threadsDrafts } from "../../../../db/schema";
+import { threadsAnalytics, threadsContentPlans, threadsDrafts, threadsQueue } from "../../../../db/schema";
 import { generateContent, topicFor } from "../../../../lib/threads/content";
 import { getThreadsSettingsRow, offerSettings } from "../../../../lib/threads/data";
 import { errorResponse, parseGenerationInput, parsePositiveId, THREAD_CATEGORIES, type ThreadsCategory } from "../../../../lib/threads/validation";
@@ -39,6 +39,75 @@ function plannedIso(startDate: string, day: number, slot: number) {
   return new Date(utc).toISOString();
 }
 
+type DraftRow = typeof threadsDrafts.$inferSelect;
+type SettingsRow = Awaited<ReturnType<typeof getThreadsSettingsRow>>;
+
+function requireThreadsConnection(settings: SettingsRow) {
+  if (!settings.threadsUserId || !settings.tokenEncrypted) {
+    throw new Error("Укажите подключённый аккаунт Threads в настройках");
+  }
+  if (
+    settings.tokenExpiresAt &&
+    new Date(settings.tokenExpiresAt).getTime() <= Date.now()
+  ) {
+    throw new Error("Укажите действующее подключение Threads: текущий токен истёк");
+  }
+}
+
+async function queueFuturePlanPosts(posts: DraftRow[], settings: SettingsRow) {
+  requireThreadsConnection(settings);
+  const db = getDb();
+  const now = new Date().toISOString();
+  const cutoff = Date.now() + 30_000;
+  let scheduled = 0;
+  let skippedPast = 0;
+  let alreadyQueued = 0;
+
+  for (const post of posts) {
+    if (["published", "publishing"].includes(post.status)) continue;
+    if (post.status === "queued") {
+      alreadyQueued += 1;
+      continue;
+    }
+    if (!post.plannedFor || new Date(post.plannedFor).getTime() <= cutoff) {
+      skippedPast += 1;
+      continue;
+    }
+    await db
+      .insert(threadsQueue)
+      .values({
+        publicationId: post.id,
+        scheduledAt: post.plannedFor,
+        status: "pending",
+        attempts: 0,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: threadsQueue.publicationId,
+        set: {
+          scheduledAt: post.plannedFor,
+          status: "pending",
+          attempts: 0,
+          nextAttemptAt: null,
+          lastError: "",
+          updatedAt: now,
+        },
+      });
+    await db
+      .update(threadsDrafts)
+      .set({
+        status: "queued",
+        scheduledAt: post.plannedFor,
+        lastError: "",
+        updatedAt: now,
+      })
+      .where(eq(threadsDrafts.id, post.id));
+    scheduled += 1;
+  }
+
+  return { scheduled, skippedPast, alreadyQueued };
+}
+
 export async function POST(request: Request) {
   try {
     await ensureSchema();
@@ -53,6 +122,8 @@ export async function POST(request: Request) {
       : new Date().toISOString().slice(0, 10);
     const db = getDb();
     const now = new Date().toISOString();
+    const settings = await getThreadsSettingsRow();
+    if (payload.autoPost === true) requireThreadsConnection(settings);
     const [plan] = await db.insert(threadsContentPlans).values({
       durationDays, postsPerDay, niche: input.niche, city: input.city, service: input.service,
       startDate: plannedIso(startDate, 0, 0), status: "active", updatedAt: now,
@@ -60,7 +131,6 @@ export async function POST(request: Request) {
     const total = durationDays * postsPerDay;
     const counts = categoryCounts(total);
     const categories = categorySequence(counts, total);
-    const settings = await getThreadsSettingsRow();
     const seen = new Set<string>();
     const draftValues = categories.map((category, index) => {
       const day = Math.floor(index / postsPerDay);
@@ -87,7 +157,44 @@ export async function POST(request: Request) {
       destinationUrl,
       updatedAt: now,
     })));
-    return Response.json({ plan, posts: drafts, duplicateCount: total - seen.size }, { status: 201 });
+    const autoPost = payload.autoPost === true
+      ? await queueFuturePlanPosts(drafts, settings)
+      : { scheduled: 0, skippedPast: 0, alreadyQueued: 0 };
+    return Response.json(
+      { plan, posts: drafts, duplicateCount: total - seen.size, autoPost },
+      { status: 201 },
+    );
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    await ensureSchema();
+    const payload = await request.json() as Record<string, unknown>;
+    const id = parsePositiveId(payload.id);
+    if (payload.action !== "enable_autopost") {
+      throw new Error("Некорректное действие для контент-плана");
+    }
+    const db = getDb();
+    const [plan] = await db
+      .select()
+      .from(threadsContentPlans)
+      .where(eq(threadsContentPlans.id, id))
+      .limit(1);
+    if (!plan) {
+      return Response.json({ error: "Контент-план не найден" }, { status: 404 });
+    }
+    const posts = await db
+      .select()
+      .from(threadsDrafts)
+      .where(eq(threadsDrafts.contentPlanId, id));
+    const autoPost = await queueFuturePlanPosts(
+      posts,
+      await getThreadsSettingsRow(),
+    );
+    return Response.json({ plan, autoPost });
   } catch (error) {
     return errorResponse(error);
   }
